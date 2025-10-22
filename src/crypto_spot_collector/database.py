@@ -19,8 +19,7 @@ class DatabaseConfig:
 
     def __init__(self):
         self.database_url = os.getenv(
-            "DATABASE_URL", 
-            "mysql://crypto_user:crypto_pass@mysql:3306/crypto_pachinko"
+            "DATABASE_URL", "mysql://crypto_user:crypto_pass@mysql:3306/crypto_pachinko"
         )
         self.host = os.getenv("MYSQL_HOST", "mysql")
         self.port = int(os.getenv("MYSQL_PORT", "3306"))
@@ -58,9 +57,7 @@ class DatabaseManager:
         """Get session factory."""
         if self._session_factory is None:
             self._session_factory = sessionmaker(
-                autocommit=False,
-                autoflush=False,
-                bind=self.engine
+                autocommit=False, autoflush=False, bind=self.engine
             )
         return self._session_factory
 

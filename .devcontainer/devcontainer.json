@@ -3,6 +3,10 @@
     "dockerComposeFile": "docker-compose.yml",
     "service": "app",
     "workspaceFolder": "/workspaces/crypto-spot-collector",
+    "features": {
+        "ghcr.io/devcontainers/features/git:1": {},
+        "ghcr.io/devcontainers/features/github-cli:1": {}
+    },
     "customizations": {
         "vscode": {
             "extensions": [
@@ -15,7 +19,9 @@
                 "redhat.vscode-yaml",
                 "ms-vscode.makefile-tools",
                 "eamodio.gitlens",
-                "ms-python.debugpy"
+                "ms-python.debugpy",
+                "github.copilot",
+                "github.copilot-chat"
             ],
             "settings": {
                 "python.defaultInterpreterPath": "/usr/local/bin/python",
@@ -32,6 +38,9 @@
                 "files.trimTrailingWhitespace": true
             }
         }
+    },
+    "remoteEnv": {
+        "PATH": "${containerEnv:PATH}:/usr/local/bin"
     },
     "postCreateCommand": "bash .devcontainer/setup.sh",
     "remoteUser": "vscode"

@@ -1,8 +1,13 @@
 #!/bin/bash
 
-# uv installation
-curl -LsSf https://astral.sh/uv/install.sh | sh
-export PATH="$HOME/.cargo/bin:$PATH"
+# Check if uv is available
+if ! command -v uv &> /dev/null; then
+    echo "Installing uv..."
+    curl -LsSf https://astral.sh/uv/install.sh | sh
+    export PATH="$HOME/.cargo/bin:$PATH"
+else
+    echo "uv is already installed"
+fi
 
 # Wait for MySQL to be ready
 echo "Waiting for MySQL to be ready..."
