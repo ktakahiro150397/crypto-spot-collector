@@ -5,7 +5,11 @@
     "workspaceFolder": "/workspaces/crypto-spot-collector",
     "features": {
         "ghcr.io/devcontainers/features/git:1": {},
-        "ghcr.io/devcontainers/features/github-cli:1": {}
+        "ghcr.io/devcontainers/features/github-cli:1": {},
+        "ghcr.io/devcontainers/features/node:1": {
+            "nodeGypDependencies": true,
+            "version": "lts"
+        }
     },
     "customizations": {
         "vscode": {

@@ -23,6 +23,10 @@ uv sync --dev
 # Install pre-commit hooks
 uv run pre-commit install
 
+# Install Node.js dependencies for crypto data fetching
+echo "Installing binance-historical-data..."
+npm install -g binance-historical-data
+
 # Create basic project structure
 mkdir -p src/crypto_spot_collector
 mkdir -p tests
