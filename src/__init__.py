@@ -1,0 +1,1 @@
+"""Crypto Spot Collector package."""
