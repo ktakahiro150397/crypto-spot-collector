@@ -7,7 +7,7 @@ from src.crypto_spot_collector.database import db_manager
 from src.crypto_spot_collector.models import Cryptocurrency, OHLCVData, TradeData
 
 
-def test_database_connection():
+def test_database_connection() -> bool:
     """Test database connection and basic operations."""
     print("🔍 Testing database connection...")
 

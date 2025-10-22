@@ -1,19 +1,15 @@
 """Database models for crypto spot collector."""
 
-from datetime import datetime
-from decimal import Decimal
-from typing import Optional
-
 from sqlalchemy import (
-    Column,
-    Integer,
-    String,
     DECIMAL,
     TIMESTAMP,
     Boolean,
+    Column,
+    Enum,
     ForeignKey,
     Index,
-    Enum,
+    Integer,
+    String,
 )
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
@@ -55,11 +51,15 @@ class OHLCVData(Base):
     cryptocurrency_id = Column(
         Integer, ForeignKey("cryptocurrencies.id"), nullable=False
     )
-    open_price = Column(DECIMAL(20, 8), nullable=False, comment="オープン価格")
-    high_price = Column(DECIMAL(20, 8), nullable=False, comment="高値")
-    low_price = Column(DECIMAL(20, 8), nullable=False, comment="安値")
-    close_price = Column(DECIMAL(20, 8), nullable=False, comment="クローズ価格")
-    volume = Column(DECIMAL(20, 8), nullable=False, comment="取引量")
+    open_price: Column[DECIMAL] = Column(
+        DECIMAL(20, 8), nullable=False, comment="オープン価格"
+    )
+    high_price: Column[DECIMAL] = Column(DECIMAL(20, 8), nullable=False, comment="高値")
+    low_price: Column[DECIMAL] = Column(DECIMAL(20, 8), nullable=False, comment="安値")
+    close_price: Column[DECIMAL] = Column(
+        DECIMAL(20, 8), nullable=False, comment="クローズ価格"
+    )
+    volume: Column[DECIMAL] = Column(DECIMAL(20, 8), nullable=False, comment="取引量")
     timestamp_utc = Column(TIMESTAMP, nullable=False, comment="データ時刻（UTC）")
     created_at = Column(TIMESTAMP, server_default=func.current_timestamp())
 
@@ -84,7 +84,7 @@ class OHLCVData(Base):
 
 
 class TradeData(Base):
-    """Trade data model with exchange, position type, spot/derivatives, leverage info."""
+    """Trade data model with exchange, position type, spot/derivatives."""
 
     __tablename__ = "trade_data"
 
@@ -93,7 +93,7 @@ class TradeData(Base):
         Integer, ForeignKey("cryptocurrencies.id"), nullable=False
     )
     exchange_name = Column(String(50), nullable=False, comment="取引所名")
-    position_type = Column(
+    position_type: Column[Enum] = Column(
         Enum("LONG", "SHORT", name="position_type_enum"),
         nullable=False,
         comment="ロング/ショート",
@@ -103,11 +103,11 @@ class TradeData(Base):
         nullable=False,
         comment="現物かどうか（TRUE: 現物, FALSE: 先物/デリバティブ）",
     )
-    leverage_ratio = Column(
+    leverage_ratio: Column[DECIMAL] = Column(
         DECIMAL(5, 2), default=1.00, comment="レバレッジ倍率（現物の場合は1.00）"
     )
-    price = Column(DECIMAL(20, 8), nullable=False, comment="取引価格")
-    quantity = Column(DECIMAL(20, 8), nullable=False, comment="取引数量")
+    price: Column[DECIMAL] = Column(DECIMAL(20, 8), nullable=False, comment="取引価格")
+    quantity: Column[DECIMAL] = Column(DECIMAL(20, 8), nullable=False, comment="取引数量")
     timestamp_utc = Column(TIMESTAMP, nullable=False, comment="取引時刻（UTC）")
     created_at = Column(TIMESTAMP, server_default=func.current_timestamp())
 

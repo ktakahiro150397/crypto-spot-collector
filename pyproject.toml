@@ -39,11 +39,24 @@ include = '\.pyi?$'
 profile = "black"
 line_length = 88
 
+[tool.flake8]
+max-line-length = 88
+extend-ignore = ["E203", "W503"]
+
 [tool.mypy]
 python_version = "3.11"
 warn_return_any = true
 warn_unused_configs = true
 disallow_untyped_defs = true
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = ["sqlalchemy.*"]
+ignore_errors = true
+
+[[tool.mypy.overrides]]
+module = ["pymysql.*"]
+ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

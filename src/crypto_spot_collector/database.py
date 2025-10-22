@@ -3,10 +3,14 @@
 import os
 from typing import Optional
 
-from sqlalchemy import create_engine, Engine
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker, Session
+import pymysql  # MySQL driver  # type: ignore
 from dotenv import load_dotenv
+from sqlalchemy import Engine, create_engine, text
+from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import Session, sessionmaker
+
+# PyMySQLをMySQLdbとして使用
+pymysql.install_as_MySQLdb()
 
 # 環境変数の読み込み
 load_dotenv()
@@ -17,11 +21,12 @@ Base = declarative_base()
 class DatabaseConfig:
     """Database configuration class."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.database_url = os.getenv(
-            "DATABASE_URL", "mysql://crypto_user:crypto_pass@mysql:3306/crypto_pachinko"
+            "DATABASE_URL",
+            "mysql://crypto_user:crypto_pass@localhost:3306/crypto_pachinko",
         )
-        self.host = os.getenv("MYSQL_HOST", "mysql")
+        self.host = os.getenv("MYSQL_HOST", "localhost")
         self.port = int(os.getenv("MYSQL_PORT", "3306"))
         self.database = os.getenv("MYSQL_DATABASE", "crypto_pachinko")
         self.user = os.getenv("MYSQL_USER", "crypto_user")
@@ -53,7 +58,7 @@ class DatabaseManager:
         return self._engine
 
     @property
-    def session_factory(self) -> sessionmaker:
+    def session_factory(self) -> sessionmaker[Session]:
         """Get session factory."""
         if self._session_factory is None:
             self._session_factory = sessionmaker(
@@ -73,7 +78,7 @@ class DatabaseManager:
         """Test database connection."""
         try:
             with self.engine.connect() as connection:
-                connection.execute("SELECT 1")
+                connection.execute(text("SELECT 1"))
             return True
         except Exception as e:
             print(f"Database connection failed: {e}")
