@@ -36,3 +36,17 @@ dev: install ## Setup development environment
 	@echo "✅ Development environment is ready!"
 
 check: format lint type-check test ## Run all checks
+
+# Database commands
+db-test: ## Test database connection
+	uv run python test_db.py
+
+db-shell: ## Connect to MySQL shell
+	mysql -h mysql -u crypto_user -pcrypto_pass crypto_pachinko
+
+db-logs: ## Show MySQL logs (only in devcontainer)
+	docker logs crypto-spot-collector-mysql-1
+
+db-reset: ## Reset database (WARNING: This will delete all data)
+	mysql -h mysql -u root -prootpassword -e "DROP DATABASE IF EXISTS crypto_pachinko; CREATE DATABASE crypto_pachinko;"
+	mysql -h mysql -u root -prootpassword -e "GRANT ALL PRIVILEGES ON crypto_pachinko.* TO 'crypto_user'@'%';"

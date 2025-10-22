@@ -8,6 +8,7 @@ A Python application for collecting cryptocurrency spot prices.
 
 - **Python 3.11+**
 - **uv** - Pythonパッケージ管理
+- **MySQL 8.0** - データベース
 - **Dev Container** - 開発環境の標準化
 - **Git** - バージョン管理
 
@@ -65,6 +66,40 @@ uv run flake8 src tests
 # 型チェック
 uv run mypy src
 ```
+
+## データベース
+
+### MySQL設定
+
+Dev Container内で以下の設定でMySQLが自動起動されます：
+
+- **Host**: mysql
+- **Port**: 3306
+- **Database**: crypto_pachinko
+- **User**: crypto_user
+- **Password**: crypto_pass
+- **Root Password**: rootpassword
+
+### データベースコマンド
+
+```bash
+# データベース接続テスト
+make db-test
+
+# MySQLシェルに接続
+make db-shell
+
+# データベースリセット（注意：全データが削除されます）
+make db-reset
+```
+
+### テーブル構成
+
+- `cryptocurrencies` - 暗号通貨マスタ
+- `ohlcv_data` - OHLCVデータ（通貨ごと、時間はUTC）
+  - オープン、高値、安値、クローズ、取引量
+- `trade_data` - 取引データ
+  - 取引所名、ロング/ショート、現物/デリバティブ、レバレッジ倍率、時間（UTC）
 
 ## プロジェクト構造
 
