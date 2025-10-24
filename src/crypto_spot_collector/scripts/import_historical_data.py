@@ -226,7 +226,7 @@ class HistoricalDataImporter:
         Returns:
             List of CSV file paths
         """
-        csv_files = []
+        csv_files: List[Path] = []
 
         if not self.historical_data_dir.exists():
             logger.error(
@@ -275,12 +275,12 @@ class HistoricalDataImporter:
         )
         return total_imported
 
-    def close(self):
+    def close(self) -> None:
         """Close database session."""
         self.session.close()
 
 
-def main():
+def main() -> int:
     """Main function to run the historical data import."""
     # Configure logging
     logger.add(
