@@ -39,7 +39,13 @@ check: format lint type-check test ## Run all checks
 
 # Database commands
 db-test: ## Test database connection
-	uv run python test_db.py
+	uv run test-db
+
+db-import: ## Import historical data into the database from CSV files
+	uv run import-data
+
+download:
+	bash download_historical_data.sh
 
 db-shell: ## Connect to MySQL shell
 	mysql -h mysql -u crypto_user -pcrypto_pass crypto_pachinko
