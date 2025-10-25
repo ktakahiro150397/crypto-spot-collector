@@ -18,9 +18,7 @@ class HistoricalDataImporter:
     """Historical data importer for cryptocurrency OHLCV data."""
 
     def __init__(
-        self,
-        historical_data_dir: str = "historical_data",
-        batch_size: int = 5000
+        self, historical_data_dir: str = "historical_data", batch_size: int = 5000
     ):
         """Initialize the importer with the historical data directory."""
         self.historical_data_dir = Path(historical_data_dir)
@@ -40,7 +38,7 @@ class HistoricalDataImporter:
         parent_dir = file_path.parent.name.lower()
 
         # Remove 'usdt' suffix to get the base currency symbol
-        if parent_dir.endswith('usdt'):
+        if parent_dir.endswith("usdt"):
             symbol = parent_dir[:-4].upper()  # Remove 'usdt' and convert to uppercase
             return symbol
 
@@ -62,8 +60,7 @@ class HistoricalDataImporter:
         if not crypto:
             # Create new cryptocurrency
             crypto = Cryptocurrency(
-                symbol=symbol,
-                name=f"{symbol} Token"  # Generic name for now
+                symbol=symbol, name=f"{symbol} Token"  # Generic name for now
             )
             self.session.add(crypto)
             self.session.commit()
@@ -93,7 +90,7 @@ class HistoricalDataImporter:
                 high_price=stmt.inserted.high_price,
                 low_price=stmt.inserted.low_price,
                 close_price=stmt.inserted.close_price,
-                volume=stmt.inserted.volume
+                volume=stmt.inserted.volume,
                 # timestamp_utc and cryptocurrency_id remain the same (unique key)
             )
 
@@ -129,12 +126,12 @@ class HistoricalDataImporter:
             timestamp_utc = datetime.fromtimestamp(timestamp_seconds, tz=timezone.utc)
 
             return {
-                'open_price': Decimal(row[1]),
-                'high_price': Decimal(row[2]),
-                'low_price': Decimal(row[3]),
-                'close_price': Decimal(row[4]),
-                'volume': Decimal(row[5]),
-                'timestamp_utc': timestamp_utc
+                "open_price": Decimal(row[1]),
+                "high_price": Decimal(row[2]),
+                "low_price": Decimal(row[3]),
+                "close_price": Decimal(row[4]),
+                "volume": Decimal(row[5]),
+                "timestamp_utc": timestamp_utc,
             }
         except (ValueError, IndexError) as e:
             logger.error(f"Error parsing CSV row {row}: {e}")
@@ -164,7 +161,7 @@ class HistoricalDataImporter:
         ohlcv_records = []
 
         try:
-            with open(file_path, 'r', encoding='utf-8') as csvfile:
+            with open(file_path, "r", encoding="utf-8") as csvfile:
                 reader = csv.reader(csvfile)
 
                 for row_num, row in enumerate(reader, 1):
@@ -174,7 +171,7 @@ class HistoricalDataImporter:
                         continue
 
                     # Add cryptocurrency_id to the record
-                    ohlcv_dict['cryptocurrency_id'] = crypto.id
+                    ohlcv_dict["cryptocurrency_id"] = crypto.id
                     ohlcv_records.append(ohlcv_dict)
 
                     if len(ohlcv_records) % 10000 == 0:
@@ -198,7 +195,7 @@ class HistoricalDataImporter:
         batch_count = 0
 
         for i in range(0, len(ohlcv_records), self.batch_size):
-            batch = ohlcv_records[i:i + self.batch_size]
+            batch = ohlcv_records[i : i + self.batch_size]
             batch_count += 1
 
             try:
@@ -230,8 +227,7 @@ class HistoricalDataImporter:
 
         if not self.historical_data_dir.exists():
             logger.error(
-                f"Historical data directory not found: "
-                f"{self.historical_data_dir}"
+                f"Historical data directory not found: " f"{self.historical_data_dir}"
             )
             return csv_files
 
@@ -287,14 +283,13 @@ def main() -> int:
         "logs/import_historical_data.log",
         rotation="1 day",
         retention="30 days",
-        level="INFO"
+        level="INFO",
     )
 
     # Test database connection
     if not db_manager.test_connection():
         logger.error(
-            "Database connection failed. "
-            "Please check your database configuration."
+            "Database connection failed. " "Please check your database configuration."
         )
         return 1
 
