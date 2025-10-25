@@ -107,7 +107,9 @@ class TradeData(Base):
         DECIMAL(5, 2), default=1.00, comment="レバレッジ倍率（現物の場合は1.00）"
     )
     price: Column[DECIMAL] = Column(DECIMAL(20, 8), nullable=False, comment="取引価格")
-    quantity: Column[DECIMAL] = Column(DECIMAL(20, 8), nullable=False, comment="取引数量")
+    quantity: Column[DECIMAL] = Column(
+        DECIMAL(20, 8), nullable=False, comment="取引数量"
+    )
     timestamp_utc = Column(TIMESTAMP, nullable=False, comment="取引時刻（UTC）")
     created_at = Column(TIMESTAMP, server_default=func.current_timestamp())
 
