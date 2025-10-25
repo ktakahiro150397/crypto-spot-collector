@@ -21,7 +21,8 @@ async def main() -> None:
     # 毎時0分に実行
     # while True:
     #     now = datetime.utcnow()
-    #     next_run = (now + timedelta(hours=1)).replace(minute=0, second=0, microsecond=0)
+    #     next_run = (now + timedelta(hours=1)).replace(minute=0,
+    #     second=0, microsecond=0)
     #     wait_seconds = (next_run - now).total_seconds()
     #     print(f"Waiting for {wait_seconds} seconds until next run at {next_run} UTC")
     #     await asyncio.sleep(wait_seconds)
