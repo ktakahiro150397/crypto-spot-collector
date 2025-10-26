@@ -7,9 +7,11 @@ webhook_url: str = "https://discord.com/api/webhooks/1126667309612793907/uEnoqjx
 
 async def main() -> None:
 
-    notificator: discordNotification = discordNotification(webhook_url=)
+    notificator: discordNotification = discordNotification(
+        webhook_url=webhook_url)
 
-    test_file_path: str = str(Path(__file__).resolve().parent / "test_notification.png")
+    test_file_path: str = str(
+        Path(__file__).resolve().parent / "test_notification.png")
     test_file_path2: str = str(
         Path(__file__).resolve().parent / "test_notification2.png")
 
@@ -19,7 +21,15 @@ async def main() -> None:
             file_wrapper.append(f)
             file_wrapper.append(f2)
 
-            await notificator.send_notification_async("test_message", file_wrapper)
+            symbol = "TEST"
+            amountUsdt = 3
+            freeUsdt = 10
+            message = f"""パラボリックSARでの買いシグナルを確認しました！
+
+{symbol}を{amountUsdt}USDT分購入しました。
+残りUSDT: {freeUsdt}USDT"""
+
+            await notificator.send_notification_async(message, file_wrapper)
 
 
 if __name__ == "__main__":

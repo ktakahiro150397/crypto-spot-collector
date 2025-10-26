@@ -67,7 +67,7 @@ async def main() -> None:
         # 現時刻が1h足の区切り目であれば1h足の取得・登録・シグナルチェックも実行
         if toDateUtc.hour % 1 == 0:
             checkEndDate = toDateUtc
-            checkStartDate = checkEndDate - timedelta(days=21)
+            checkStartDate = checkEndDate - timedelta(days=14)
 
             for symbol in spot_symbol:
                 await check_signal(
@@ -161,8 +161,12 @@ async def check_signal(startDate: datetime, endDate: datetime, symbol: str, time
                 return
 
             # Discord通知
-            message = f"SAR Buy Signal detected for {symbol} at {endDate} UTC"
+            free_usdt = bybit_exchange.fetch_free_usdt()
+            # message = f"SAR Buy Signal detected for {symbol} at {endDate} UTC"
+            message = f"""パラボリックSARでの買いシグナルを確認しました！
 
+{symbol} を {amountByUSDT} USDT分購入しました。
+残りUSDT: {free_usdt} USDT"""
             # グラフ作成
             plot_buf = [(notification_plot_buff(
                 df, symbol), f"{symbol}_sar.png")]

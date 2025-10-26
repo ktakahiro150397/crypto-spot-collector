@@ -16,6 +16,22 @@ class BybitExchange():
     def fetch_balance(self) -> Any:
         return self.exchange.fetch_balance()
 
+    def fetch_free_usdt(self) -> float:
+        balance = self.fetch_balance()
+
+        # USDTのfree残高を取得
+        for value in balance["info"]["result"]["list"]:
+            for coin in value["coin"]:
+                if coin["coin"] == "USDT":
+                    return float(coin["equity"]) - float(coin["locked"])
+                # equity = float(coin["equity"])
+                # locked = float(coin["locked"])
+
+                # print(
+                #     f"{coin['coin']}: equity : {equity} | locked: {locked} | free: {equity - locked}")
+
+        return 0
+
     def fetch_price(self, symbol: str) -> dict[Any, Any]:
         """
 
@@ -50,7 +66,7 @@ class BybitExchange():
             raise Exception(
                 "Currency data not found")
 
-    def create_order_spot(self, amountByUSDT: float, symbol: str) -> dict[Any, Any]:
+    def create_order_spot(self, amountByUSDT: float, symbol: str) -> Any:
         # 価格の精度を調整
         digit = 2
         if symbol in ["XRP"]:
@@ -68,7 +84,7 @@ class BybitExchange():
             symbol = f"{symbol}/USDT"
 
         current_price = self.fetch_price(symbol)["last"]
-        limit_price = current_price * 0.97  # 3%安い価格で指値買い
+        limit_price = current_price * 0.995  # 0.5%安い価格で指値買い
 
         limit_price = round(limit_price, digit)
 
