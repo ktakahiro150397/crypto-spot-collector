@@ -39,7 +39,8 @@ class HistoricalDataImporter:
 
         # Remove 'usdt' suffix to get the base currency symbol
         if parent_dir.endswith("usdt"):
-            symbol = parent_dir[:-4].upper()  # Remove 'usdt' and convert to uppercase
+            # Remove 'usdt' and convert to uppercase
+            symbol = parent_dir[:-4].upper()
             return symbol
 
         logger.warning(f"Could not extract symbol from path: {file_path}")
@@ -55,7 +56,8 @@ class HistoricalDataImporter:
             Cryptocurrency model instance
         """
         # Check if cryptocurrency already exists
-        crypto = self.session.query(Cryptocurrency).filter_by(symbol=symbol).first()
+        crypto = self.session.query(
+            Cryptocurrency).filter_by(symbol=symbol).first()
 
         if not crypto:
             # Create new cryptocurrency
@@ -123,7 +125,8 @@ class HistoricalDataImporter:
             # Convert timestamp from microseconds to datetime
             timestamp_microseconds = int(row[0])
             timestamp_seconds = timestamp_microseconds / 1_000_000
-            timestamp_utc = datetime.fromtimestamp(timestamp_seconds, tz=timezone.utc)
+            timestamp_utc = datetime.fromtimestamp(
+                timestamp_seconds, tz=timezone.utc)
 
             return {
                 "open_price": Decimal(row[1]),
@@ -151,7 +154,8 @@ class HistoricalDataImporter:
         # Extract symbol from file path
         symbol = self.extract_symbol_from_path(file_path)
         if not symbol:
-            logger.error(f"Could not extract symbol from file path: {file_path}")
+            logger.error(
+                f"Could not extract symbol from file path: {file_path}")
             return 0
 
         # Get or create cryptocurrency
@@ -188,14 +192,15 @@ class HistoricalDataImporter:
             logger.warning(f"No valid records found in {file_path}")
             return 0
 
-        logger.info(f"Parsed {len(ohlcv_records)} records, starting batch upsert...")
+        logger.info(
+            f"Parsed {len(ohlcv_records)} records, starting batch upsert...")
 
         # Process records in batches
         total_processed = 0
         batch_count = 0
 
         for i in range(0, len(ohlcv_records), self.batch_size):
-            batch = ohlcv_records[i : i + self.batch_size]
+            batch = ohlcv_records[i: i + self.batch_size]
             batch_count += 1
 
             try:
@@ -208,7 +213,8 @@ class HistoricalDataImporter:
                 )
 
             except Exception as e:
-                logger.error(f"Error in batch {batch_count} for {file_path}: {e}")
+                logger.error(
+                    f"Error in batch {batch_count} for {file_path}: {e}")
                 continue
 
         logger.info(
@@ -272,7 +278,8 @@ class HistoricalDataImporter:
         for row_num, row in enumerate(data, 1):
             try:
                 if len(row) < 6:
-                    logger.warning(f"Invalid row format at index {row_num}: {row}")
+                    logger.warning(
+                        f"Invalid row format at index {row_num}: {row}")
                     continue
 
                 # Convert timestamp from milliseconds to datetime
@@ -311,7 +318,7 @@ class HistoricalDataImporter:
         batch_count = 0
 
         for i in range(0, len(ohlcv_records), self.batch_size):
-            batch = ohlcv_records[i : i + self.batch_size]
+            batch = ohlcv_records[i: i + self.batch_size]
             batch_count += 1
 
             try:
