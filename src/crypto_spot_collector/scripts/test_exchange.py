@@ -53,17 +53,17 @@ async def main() -> None:
             print(
                 f"{coin['coin']}: equity : {equity} | locked: {locked} | free: {equity - locked}")
 
-    order_result = bybit_exchange.create_order_spot(
-        amountByUSDT=1,
-        symbol="XRP/USDT"
-    )
-    print(order_result)
+    # order_result = bybit_exchange.create_order_spot(
+    #     amountByUSDT=1,
+    #     symbol="XRP"
+    # )
+    # print(order_result)
 
-    order_result = bybit_exchange.create_order_spot(
-        amountByUSDT=1,
-        symbol="SOL/USDT"
-    )
-    print(order_result)
+    # order_result = bybit_exchange.create_order_spot(
+    #     amountByUSDT=1,
+    #     symbol="SOL"
+    # )
+    # print(order_result)
 
 
 if __name__ == "__main__":

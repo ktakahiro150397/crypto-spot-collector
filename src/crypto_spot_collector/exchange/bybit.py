@@ -51,14 +51,25 @@ class BybitExchange():
                 "Currency data not found")
 
     def create_order_spot(self, amountByUSDT: float, symbol: str) -> dict[Any, Any]:
+        # 価格の精度を調整
+        digit = 2
+        if symbol in ["XRP"]:
+            digit = 2
+        elif symbol in ["SOL", "AVAX"]:
+            digit = 3
+        elif symbol in ["ETH"]:
+            digit = 5
+        elif symbol in ["BTC"]:
+            digit = 6
+        else:
+            raise Exception(f"Unsupported symbol {symbol} for spot order")
+
         if not symbol.endswith("/USDT"):
             symbol = f"{symbol}/USDT"
 
         current_price = self.fetch_price(symbol)["last"]
         limit_price = current_price * 0.97  # 3%安い価格で指値買い
 
-        # 価格の精度を調整
-        digit = 2
         limit_price = round(limit_price, digit)
 
         # 希望注文額から数量を計算
