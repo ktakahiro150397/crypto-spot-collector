@@ -1,5 +1,4 @@
-
-
+from datetime import datetime
 from typing import Any
 
 from crypto_spot_collector.exchange.bybit import BybitExchange
@@ -23,6 +22,17 @@ async def main() -> None:
         secret=secrets["bybit"]["secret"]
     )
 
+    xrp = bybit_exchange.fetch_price("XRP/USDT")
+    print(f"xrp price : {xrp}")
+
+    xrp_ohlcv = bybit_exchange.fetch_ohlcv(
+        symbol="XRP/USDT",
+        timeframe="4h",
+        fromDate=datetime(2025, 10, 26, 0, 0, 0),
+        toDate=datetime(2025, 10, 26, 0, 0, 0),
+    )
+    print(f"xrp ohlcv : {xrp_ohlcv}")
+
     balance = bybit_exchange.fetch_balance()
 
     for value in balance["info"]["result"]["list"]:
@@ -33,8 +43,9 @@ async def main() -> None:
             print(
                 f"{coin['coin']}: equity : {equity} | locked: {locked} | free: {equity - locked}")
 
-    order_result = bybit_exchange.create_order_spot()
-    print(order_result)
+    # order_result = bybit_exchange.create_order_spot()
+    # print(order_result)
+
 
 if __name__ == "__main__":
     import asyncio

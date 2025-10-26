@@ -1,11 +1,13 @@
 from datetime import datetime, timedelta
 from io import BytesIO
+from typing import Any
 
 import matplotlib.dates as mdates
 import pandas as pd
 from matplotlib import pyplot as plt
 from ta.trend import PSARIndicator
 
+from crypto_spot_collector.exchange.bybit import BybitExchange
 from crypto_spot_collector.notification.discord import discordNotification
 from crypto_spot_collector.repository.ohlcv_repository import OHLCVRepository
 
@@ -15,6 +17,22 @@ webhook_url: str = (
 )
 
 notificator = discordNotification(webhook_url)
+
+def load_secrets() -> Any:
+    import json
+    from pathlib import Path
+
+    secrets_path = Path(__file__).parent / "secrets.json"
+    with open(secrets_path, "r") as f:
+        secrets = json.load(f)
+    return secrets
+
+secrets = load_secrets()
+
+bybit_exchange = BybitExchange(
+    apiKey=secrets["bybit"]["apiKey"],
+    secret=secrets["bybit"]["secret"]
+)
 
 
 async def main() -> None:
@@ -28,6 +46,8 @@ async def main() -> None:
     #     await asyncio.sleep(wait_seconds)
 
     # await calculate_and_plot_sar()
+
+
 
     test_date_start = datetime(2025, 9, 1)
     test_iterations = 120
