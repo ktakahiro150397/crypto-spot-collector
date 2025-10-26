@@ -1,24 +1,41 @@
 
+# Define the list of tickers to download
+tickers=("xrpusdt" "btcusdt" "ethusdt" "solusdt" "avaxusdt")
 
-ticker=btcusdt
+# Loop through each ticker
+for ticker in "${tickers[@]}"; do
+    echo "Downloading historical data for $ticker..."
 
-mkdir -p historical_data/$ticker
-cd historical_data/$ticker
+    # Create directory for the ticker
+    mkdir -p historical_data/$ticker
+    cd historical_data/$ticker
 
-# Download historical data using binance-historical
-# For 1-minute klines from October 2025
-npx binance-fetch -d 2025-01 2025-10 -p spot -t klines -s $ticker -i 1m
-npx binance-fetch -d 2025-10-01 2025-10-31 -p spot -t klines -s $ticker -i 1m
+    # Download historical data using binance-historical
+    # For 1-minute klines from October 2025
+    echo "Downloading monthly data for $ticker..."
+    npx binance-fetch -d 2025-01 2025-10 -p spot -t klines -s $ticker -i 1m
+    echo "Downloading daily data for October 2025 for $ticker..."
+    npx binance-fetch -d 2025-10-01 2025-10-31 -p spot -t klines -s $ticker -i 1m
 
-# Loop through all zip files and unzip them / delete the zip files
-if ls *.zip 1> /dev/null 2>&1; then
-    for file in *.zip; do
-        unzip -o "$file"
-        rm "$file"
-    done
-else
-    echo "No zip files found to extract"
-fi
+    # Loop through all zip files and unzip them / delete the zip files
+    if ls *.zip 1> /dev/null 2>&1; then
+        echo "Extracting zip files for $ticker..."
+        for file in *.zip; do
+            unzip -o "$file"
+            rm "$file"
+        done
+    else
+        echo "No zip files found to extract for $ticker"
+    fi
+
+    # Go back to the root directory
+    cd ../../
+
+    echo "Completed download for $ticker"
+    echo "----------------------------------------"
+done
+
+echo "All ticker downloads completed!"
 
 
 # CSV format

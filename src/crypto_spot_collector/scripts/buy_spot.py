@@ -38,9 +38,17 @@ async def main() -> None:
         endDate = test_date
         startDate = endDate - timedelta(days=21)
 
+        # await check_signal(startDate=startDate,
+        #                    endDate=endDate,
+        #                    symbol="BTC")
+
+        # await check_signal(startDate=startDate,
+        #                    endDate=endDate,
+        #                    symbol="XRP")
+
         await check_signal(startDate=startDate,
                            endDate=endDate,
-                           symbol="BTC")
+                           symbol="SOL")
 
 
 async def check_signal(startDate: datetime, endDate: datetime, symbol: str) -> None:
