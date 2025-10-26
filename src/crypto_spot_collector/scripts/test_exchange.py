@@ -1,7 +1,8 @@
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from crypto_spot_collector.exchange.bybit import BybitExchange
+from crypto_spot_collector.scripts.import_historical_data import HistoricalDataImporter
 
 
 def load_secrets() -> Any:
@@ -24,14 +25,23 @@ async def main() -> None:
 
     xrp = bybit_exchange.fetch_price("XRP/USDT")
     print(f"xrp price : {xrp}")
+    print(f"xrp last price : {xrp['last']}")
 
+    print(datetime.now())
+    # 過去1日のOHLCVデータを取得して登録
+    toDateUtc = datetime.now(timezone.utc)
+    fromDateUtc = toDateUtc - timedelta(days=1)
     xrp_ohlcv = bybit_exchange.fetch_ohlcv(
         symbol="XRP/USDT",
         timeframe="4h",
-        fromDate=datetime(2025, 10, 26, 0, 0, 0),
-        toDate=datetime(2025, 10, 26, 0, 0, 0),
+        fromDate=fromDateUtc,
+        toDate=toDateUtc,
     )
     print(f"xrp ohlcv : {xrp_ohlcv}")
+
+    # OHLCVデータの登録
+    importer = HistoricalDataImporter()
+    importer.register_data('XRP', xrp_ohlcv)
 
     balance = bybit_exchange.fetch_balance()
 

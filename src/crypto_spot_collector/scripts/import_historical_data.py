@@ -241,6 +241,98 @@ class HistoricalDataImporter:
         logger.info(f"Found {len(csv_files)} CSV files to import")
         return csv_files
 
+    def register_data(self, symbol: str, data: List[List]) -> int:
+        """Register OHLCV data for a given symbol.
+
+        Args:
+            symbol: Cryptocurrency symbol (e.g., 'BTC', 'ETH')
+            data: List of OHLCV data in format:
+                  [[timestamp_ms, open, high, low, close, volume], ...]
+                  where timestamp_ms is in milliseconds
+
+        Returns:
+            Number of records registered
+
+        Example:
+            data = [
+                [1761264000000, 2.3949, 2.4098, 2.3866, 2.4065, 4460055.56],
+                [1761278400000, 2.4065, 2.4488, 2.4039, 2.4405, 8257374.49],
+                ...
+            ]
+            importer.register_data('BTC', data)
+        """
+        logger.info(f"Registering {len(data)} records for symbol: {symbol}")
+
+        # Get or create cryptocurrency
+        crypto = self.get_or_create_cryptocurrency(symbol)
+
+        # Parse data into OHLCV records
+        ohlcv_records = []
+
+        for row_num, row in enumerate(data, 1):
+            try:
+                if len(row) < 6:
+                    logger.warning(f"Invalid row format at index {row_num}: {row}")
+                    continue
+
+                # Convert timestamp from milliseconds to datetime
+                timestamp_ms = int(row[0])
+                timestamp_seconds = timestamp_ms / 1000
+                timestamp_utc = datetime.fromtimestamp(
+                    timestamp_seconds, tz=timezone.utc
+                )
+
+                ohlcv_dict = {
+                    "cryptocurrency_id": crypto.id,
+                    "timestamp_utc": timestamp_utc,
+                    "open_price": Decimal(str(row[1])),
+                    "high_price": Decimal(str(row[2])),
+                    "low_price": Decimal(str(row[3])),
+                    "close_price": Decimal(str(row[4])),
+                    "volume": Decimal(str(row[5])),
+                }
+                ohlcv_records.append(ohlcv_dict)
+
+            except (ValueError, IndexError) as e:
+                logger.error(f"Error parsing row {row_num} for {symbol}: {e}")
+                continue
+
+        if not ohlcv_records:
+            logger.warning(f"No valid records to register for {symbol}")
+            return 0
+
+        logger.info(
+            f"Parsed {len(ohlcv_records)} records for {symbol}, "
+            f"starting batch upsert..."
+        )
+
+        # Process records in batches
+        total_processed = 0
+        batch_count = 0
+
+        for i in range(0, len(ohlcv_records), self.batch_size):
+            batch = ohlcv_records[i : i + self.batch_size]
+            batch_count += 1
+
+            try:
+                processed = self.bulk_upsert_ohlcv_data(batch)
+                total_processed += processed
+
+                logger.info(
+                    f"Batch {batch_count}: Processed {processed} records "
+                    f"({total_processed}/{len(ohlcv_records)})"
+                )
+
+            except Exception as e:
+                logger.error(f"Error in batch {batch_count} for {symbol}: {e}")
+                continue
+
+        logger.info(
+            f"Completed registering data for {symbol}: "
+            f"{total_processed} records processed"
+        )
+        return total_processed
+
     def import_all_data(self) -> int:
         """Import all historical data from CSV files.
 
