@@ -164,7 +164,8 @@ async def check_signal(
             except Exception as e:
                 logger.error(f"Error creating spot order for {symbol}: {e}")
                 await notificator.send_notification_async(
-                    message=f"Error creating spot order for {symbol}: {e}"
+                    message=f"Error creating spot order for {symbol}: {e}",
+                    files=[]
                 )
                 return
 
