@@ -154,7 +154,7 @@ async def check_signal(
 
         # デバッグ用：実際の値を表示
         logger.debug(f"{symbol}: Recent SAR Up values (newest first):")
-        if not sar_up_signal:
+        if sar_up_signal:
             logger.info(f"{symbol}: SAR buy signal detected! Placing order...")
             order_result = None
             try:
