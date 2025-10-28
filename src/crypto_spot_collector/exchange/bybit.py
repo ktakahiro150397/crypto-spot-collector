@@ -1,3 +1,4 @@
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
@@ -5,6 +6,17 @@ import ccxt
 from loguru import logger
 
 # bybit.enable_demo_trading(enable=True)
+
+
+@dataclass
+class SpotOrderResult:
+    """スポット注文の結果を格納するクラス"""
+    order_id: str
+    symbol: str
+    amount: float  # 実際に注文した数量
+    price: float   # 実際に注文した価格
+    order_value: float  # 注文総額 (amount * price)
+    original_order: Any  # 元のorder情報
 
 
 class BybitExchange():
@@ -87,21 +99,20 @@ class BybitExchange():
             raise Exception(
                 "Currency data not found")
 
-    def create_order_spot(self, amountByUSDT: float, symbol: str) -> Any:
+    def create_order_spot(self, amountByUSDT: float, symbol: str) -> tuple[Any, SpotOrderResult]:
         logger.info(
             f"Creating spot order for {symbol} with {amountByUSDT} USDT")
 
         # 価格の精度を調整
-        digit = 2
         if symbol in ["POL", "DOGE"]:
             digit = 1
-        if symbol in ["XRP"]:
+        elif symbol in ["XRP", "WLD"]:
             digit = 2
         elif symbol in ["SOL", "AVAX", "HYPE"]:
             digit = 3
         elif symbol in ["BNB"]:
             digit = 4
-        elif symbol in ["ETH", "WLD", "LTC"]:
+        elif symbol in ["ETH", "LTC"]:
             digit = 5
         elif symbol in ["BTC"]:
             digit = 6
@@ -153,7 +164,19 @@ class BybitExchange():
             )
             logger.success(
                 f"Spot order created successfully for {symbol}: Order ID {order.get('id', 'N/A')}")
-            return order
+
+            # 結果をSpotOrderResultクラスにまとめる
+            result = SpotOrderResult(
+                order_id=order.get('id', 'N/A'),
+                symbol=symbol,
+                amount=buy_amount,
+                price=limit_price,
+                order_value=final_order_value,
+                original_order=order
+            )
+
+            return order, result
+
         except Exception as e:
             logger.error(f"Failed to create spot order for {symbol}: {e}")
             raise

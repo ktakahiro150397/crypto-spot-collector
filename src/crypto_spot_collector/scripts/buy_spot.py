@@ -154,10 +154,11 @@ async def check_signal(
 
         # デバッグ用：実際の値を表示
         logger.debug(f"{symbol}: Recent SAR Up values (newest first):")
-        if sar_up_signal:
+        if not sar_up_signal:
             logger.info(f"{symbol}: SAR buy signal detected! Placing order...")
+            order_result = None
             try:
-                bybit_exchange.create_order_spot(
+                _, order_result = bybit_exchange.create_order_spot(
                     amountByUSDT=amountByUSDT, symbol=symbol
                 )
                 logger.success(f"Successfully created spot order for {symbol}")
@@ -171,16 +172,27 @@ async def check_signal(
 
             # Discord通知
             free_usdt = bybit_exchange.fetch_free_usdt()
+            embed = discordNotification.embed_object_create_helper(
+                symbol=symbol,
+                price=order_result.price,
+                amount=order_result.amount,
+                freeUsdt=free_usdt,
+                order_value=order_result.order_value,
+                order_id=order_result.order_id,
+                footer="buy_spot.py | bybit"
+            )
             # message = f"SAR Buy Signal detected for {symbol} at {endDate} UTC"
-            message = f"""パラボリックSARでの買いシグナルを確認しました！
+#             message = f"""パラボリックSARでの買いシグナルを確認しました！
 
-{symbol} を {amountByUSDT} USDT分購入しました。
-残りUSDT: {free_usdt} USDT"""
+# {symbol} を {amountByUSDT} USDT分購入しました。
+# 残りUSDT: {free_usdt} USDT"""
             # グラフ作成
             plot_buf = [(notification_plot_buff(
                 df, symbol), f"{symbol}_sar.png")]
-            await notificator.send_notification_with_image_async(
-                message=message, image_buffers=plot_buf
+            await notificator.send_notification_embed_with_file(
+                message="",
+                embeds=[embed],
+                image_buffers=plot_buf
             )
             logger.info(f"Sent Discord notification for {symbol}")
 
