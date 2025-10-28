@@ -2,48 +2,63 @@ from datetime import datetime
 from typing import Any
 
 import ccxt
+from loguru import logger
 
 # bybit.enable_demo_trading(enable=True)
 
 
 class BybitExchange():
     def __init__(self, apiKey: str, secret: str) -> None:
+        logger.info("Initializing Bybit exchange client")
         self.exchange = ccxt.bybit({
             'apiKey': apiKey,
             "secret": secret,
         })
+        logger.info("Bybit exchange client initialized successfully")
 
     def fetch_balance(self) -> Any:
-        return self.exchange.fetch_balance()
+        logger.debug("Fetching account balance")
+        balance = self.exchange.fetch_balance()
+        logger.debug("Account balance fetched successfully")
+        return balance
 
     def fetch_free_usdt(self) -> float:
+        logger.debug("Fetching free USDT balance")
         balance = self.fetch_balance()
 
         # USDTのfree残高を取得
         for value in balance["info"]["result"]["list"]:
             for coin in value["coin"]:
                 if coin["coin"] == "USDT":
-                    return float(coin["equity"]) - float(coin["locked"])
+                    free_usdt = float(coin["equity"]) - float(coin["locked"])
+                    logger.info(f"Free USDT balance: {free_usdt}")
+                    return free_usdt
                 # equity = float(coin["equity"])
                 # locked = float(coin["locked"])
 
-                # print(
+                # logger.debug(
                 #     f"{coin['coin']}: equity : {equity} | locked: {locked} | free: {equity - locked}")
 
+        logger.warning("USDT balance not found, returning 0")
         return 0
 
     def fetch_price(self, symbol: str) -> dict[Any, Any]:
         """
 
         """
+        logger.debug(f"Fetching price for {symbol}")
         ticker: dict[Any, Any] = self.exchange.fetch_ticker(symbol)
         if 'last' in ticker:
+            logger.debug(f"Price for {symbol}: {ticker['last']}")
             return ticker
         else:
+            logger.error(f"Price not found for symbol {symbol}")
             raise Exception(
                 f"symbol = {symbol} | Price not found in ticker data")
 
     def fetch_ohlcv(self, symbol: str, timeframe: str, fromDate: datetime, toDate: datetime) -> dict[Any, Any]:
+        logger.debug(
+            f"Fetching OHLCV data for {symbol} ({timeframe}) from {fromDate} to {toDate}")
         ohlcv: dict[Any, Any] = self.exchange.fetch_ohlcv(
             symbol=symbol,
             timeframe=timeframe,
@@ -53,40 +68,58 @@ class BybitExchange():
             },
             limit=1000)
         if ohlcv:
+            logger.debug(
+                f"OHLCV data fetched for {symbol}: {len(ohlcv)} records")
             return ohlcv
         else:
+            logger.error(f"OHLCV data not found for symbol {symbol}")
             raise Exception(
                 f"symbol = {symbol} | OHLCV data not found")
 
     def fetch_currency(self) -> dict[Any, Any]:
+        logger.debug("Fetching currency data")
         currency: dict[Any, Any] = self.exchange.fetch_currencies()
         if currency:
+            logger.debug(f"Currency data fetched: {len(currency)} currencies")
             return currency
         else:
+            logger.error("Currency data not found")
             raise Exception(
                 "Currency data not found")
 
     def create_order_spot(self, amountByUSDT: float, symbol: str) -> Any:
+        logger.info(
+            f"Creating spot order for {symbol} with {amountByUSDT} USDT")
+
         # 価格の精度を調整
         digit = 2
+        if symbol in ["POL", "DOGE"]:
+            digit = 1
         if symbol in ["XRP"]:
             digit = 2
-        elif symbol in ["SOL", "AVAX"]:
+        elif symbol in ["SOL", "AVAX", "HYPE"]:
             digit = 3
-        elif symbol in ["ETH"]:
+        elif symbol in ["BNB"]:
+            digit = 4
+        elif symbol in ["ETH", "WLD", "LTC"]:
             digit = 5
         elif symbol in ["BTC"]:
             digit = 6
         else:
+            logger.error(f"Unsupported symbol {symbol} for spot order")
             raise Exception(f"Unsupported symbol {symbol} for spot order")
+
+        logger.debug(f"Using precision digit: {digit} for {symbol}")
 
         if not symbol.endswith("/USDT"):
             symbol = f"{symbol}/USDT"
 
         current_price = self.fetch_price(symbol)["last"]
         limit_price = current_price * 0.995  # 0.5%安い価格で指値買い
-
         limit_price = round(limit_price, digit)
+
+        logger.debug(
+            f"Current price: {current_price}, Limit price: {limit_price}")
 
         # 希望注文額から数量を計算
         buy_amount = amountByUSDT / limit_price
@@ -95,22 +128,32 @@ class BybitExchange():
         # 精度調整後に注文額が1USDT未満になる場合、1USDTを超える最小値に調整
         order_value = buy_amount * limit_price
         if order_value < 1:
+            logger.debug(
+                f"Order value {order_value} < 1 USDT, adjusting amount")
             # 1USDTを超える最小の数量を計算
             buy_amount = round(1 / limit_price, digit)
             # 丸めた結果がまだ1未満の場合、最小単位ずつ増やす
             min_increment = 10 ** (-digit)  # digit=3なら0.001、digit=2なら0.01
             while buy_amount * limit_price < 1:
                 buy_amount = round(buy_amount + min_increment, digit)
+            logger.debug(f"Adjusted buy amount: {buy_amount}")
 
-        print(
-            f"Place spot buy order : symbol={symbol}, amount={buy_amount}, price={limit_price}, order_value={buy_amount * limit_price:.2f} USDT")
-        order = self.exchange.create_order(
-            symbol=symbol,
-            type='limit',
-            side='buy',
-            amount=buy_amount,
-            price=limit_price,
-            params={}
-        )
+        final_order_value = buy_amount * limit_price
+        logger.info(
+            f"Placing spot buy order: symbol={symbol}, amount={buy_amount}, price={limit_price}, order_value={final_order_value:.2f} USDT")
 
-        return order
+        try:
+            order = self.exchange.create_order(
+                symbol=symbol,
+                type='limit',
+                side='buy',
+                amount=buy_amount,
+                price=limit_price,
+                params={}
+            )
+            logger.success(
+                f"Spot order created successfully for {symbol}: Order ID {order.get('id', 'N/A')}")
+            return order
+        except Exception as e:
+            logger.error(f"Failed to create spot order for {symbol}: {e}")
+            raise

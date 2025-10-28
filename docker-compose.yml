@@ -13,7 +13,6 @@ services:
       - crypto-network
     environment:
       - DATABASE_URL=mysql://crypto_user:crypto_pass@mysql:3306/crypto_pachinko
-    
   
   mysql:
     image: mysql:8.0
