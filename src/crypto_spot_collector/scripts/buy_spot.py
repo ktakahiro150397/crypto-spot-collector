@@ -58,12 +58,14 @@ async def main() -> None:
         f"Discord Webhook URL: {secrets['settings']['discordWebhookUrl']}")
     logger.info("------------------")
 
+    timeframe_delta = int(timeframe.replace("m","").replace("h","").replace("d",""))
+
     while True:
-        # 1h足の取得・登録
+        # 時間足の取得・登録
         toDateUtc = datetime.now(timezone.utc).replace(
             minute=0, second=0, microsecond=0
         )
-        fromDateUtc = toDateUtc - timedelta(days=1)
+        fromDateUtc = toDateUtc - timedelta(days=7)
 
         logger.info(f"Fetching OHLCV data from {fromDateUtc} to {toDateUtc}")
 
@@ -72,7 +74,7 @@ async def main() -> None:
             logger.debug(f"Processing {symbol.upper()}/USDT")
             ohlcv = bybit_exchange.fetch_ohlcv(
                 symbol=f"{symbol.upper()}/USDT",
-                timeframe=timeframe,
+                timeframe="1h",
                 fromDate=fromDateUtc,
                 toDate=toDateUtc,
             )
@@ -82,7 +84,7 @@ async def main() -> None:
             logger.debug(f"Registered OHLCV data for {symbol.upper()}")
 
         # 現時刻が1h足の区切り目であれば1h足の取得・登録・シグナルチェックも実行
-        if toDateUtc.hour % 1 == 0:
+        if toDateUtc.hour % timeframe_delta == 0:
             logger.info("Checking signals for all symbols")
             checkEndDate = toDateUtc
             checkStartDate = checkEndDate - timedelta(days=14)
@@ -93,13 +95,13 @@ async def main() -> None:
                     startDate=checkStartDate,
                     endDate=checkEndDate,
                     symbol=symbol.upper(),
-                    timeframe="1h",
+                    timeframe=timeframe,
                 )
 
         # 待機処理
         now = datetime.now(timezone.utc)
         logger.info(f"Current time: {now}")
-        next_run = (now + timedelta(hours=1)).replace(minute=0,
+        next_run = (now + timedelta(hours=timeframe_delta)).replace(minute=0,
                                                       second=0, microsecond=0)
         wait_seconds = (next_run - now).total_seconds()
         logger.info(
