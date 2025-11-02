@@ -112,7 +112,7 @@ class BybitExchange():
             digit = 3
         elif symbol in ["BNB"]:
             digit = 4
-        elif symbol in ["ETH", "LTC"]:
+        elif symbol in ["ETH", "LTC", "XAUT"]:
             digit = 5
         elif symbol in ["BTC"]:
             digit = 6

@@ -14,7 +14,8 @@ from crypto_spot_collector.repository.ohlcv_repository import OHLCVRepository
 from crypto_spot_collector.scripts.import_historical_data import HistoricalDataImporter
 
 spot_symbol = ["btc", "eth", "xrp", "sol",
-               "avax", "hype", "bnb", "doge", "wld", "ltc", "pol",]
+               "avax", "hype", "bnb", "doge", "wld", "ltc", "pol",
+               "xaut",]
 
 
 def load_secrets() -> Any:
@@ -84,7 +85,8 @@ async def main() -> None:
             logger.debug(f"Registered OHLCV data for {symbol.upper()}")
 
         # 現時刻が1h足の区切り目であれば1h足の取得・登録・シグナルチェックも実行
-        if toDateUtc.hour % timeframe_delta == 0:
+        toJst = toDateUtc.astimezone(timezone(timedelta(hours=9)))
+        if toJst.hour % timeframe_delta == 0:
             logger.info("Checking signals for all symbols")
             checkEndDate = toDateUtc
             checkStartDate = checkEndDate - timedelta(days=14)
@@ -97,7 +99,10 @@ async def main() -> None:
                     symbol=symbol.upper(),
                     timeframe=timeframe,
                 )
-
+        else:
+            logger.info(
+                f"Current hour {toJst.hour} is not a multiple of {timeframe_delta}, skipping signal check"
+            )
         # 待機処理
         now = datetime.now(timezone.utc)
         logger.info(f"Current time: {now}")
