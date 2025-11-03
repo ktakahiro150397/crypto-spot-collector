@@ -102,10 +102,11 @@ class discordNotification(NotificationBase):
                                    freeUsdt: float,
                                    order_value: float,
                                    order_id: str,
+                                   timeframe: str,
                                    footer: str) -> dict:
         """Create a Discord embed object for notifications."""
         embed = {
-            "title": f":satellite: {symbol} パラボリックSARの上昇トレンドを検知しました！",
+            "title": f":satellite: ({timeframe}) {symbol} パラボリックSARの上昇トレンドを検知しました！",
             "color": 3066993,  # 緑色
             "fields": [
                 {

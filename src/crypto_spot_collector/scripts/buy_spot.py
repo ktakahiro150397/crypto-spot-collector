@@ -1,10 +1,13 @@
 from datetime import datetime, timedelta, timezone
 from io import BytesIO
+from pathlib import Path
 from typing import Any
 
 import matplotlib.dates as mdates
 import pandas as pd
+import seaborn as sns
 from loguru import logger
+from matplotlib import font_manager
 from matplotlib import pyplot as plt
 from ta.trend import PSARIndicator
 
@@ -12,6 +15,47 @@ from crypto_spot_collector.exchange.bybit import BybitExchange
 from crypto_spot_collector.notification.discord import discordNotification
 from crypto_spot_collector.repository.ohlcv_repository import OHLCVRepository
 from crypto_spot_collector.scripts.import_historical_data import HistoricalDataImporter
+
+# --- seaborn 設定 ---
+# ライトテーマでいい感じのスタイルを設定
+sns.set_style("whitegrid")
+sns.set_palette("husl")
+
+# カスタムTTFフォントを使用する設定
+# 使い方: fontsフォルダにTTFファイルを配置して、ファイル名を指定
+# 例: "fonts/Inter-Regular.ttf" or "fonts/Roboto-Regular.ttf"
+CUSTOM_FONT_PATH = Path(
+    __file__).parent / "font" / "CourierPrime-Regular.ttf"
+
+if CUSTOM_FONT_PATH and Path(CUSTOM_FONT_PATH).exists():
+    # TTFファイルを登録
+    font_manager.fontManager.addfont(CUSTOM_FONT_PATH)
+    custom_font = font_manager.FontProperties(fname=CUSTOM_FONT_PATH)
+    plt.rcParams['font.family'] = custom_font.get_name()
+    print(f"カスタムフォントを使用: {custom_font.get_name()}")
+else:
+    # デフォルトフォント（システムフォント）
+    plt.rcParams['font.family'] = 'sans-serif'
+    plt.rcParams['font.sans-serif'] = ['Arial', 'Helvetica', 'DejaVu Sans']
+    if CUSTOM_FONT_PATH:
+        print(f"警告: {CUSTOM_FONT_PATH} が見つかりません。デフォルトフォントを使用します。")
+
+plt.rcParams['font.size'] = 11
+
+# ライトテーマの配色
+plt.rcParams['figure.facecolor'] = '#FFFFFF'
+plt.rcParams['axes.facecolor'] = '#F8F9FA'
+plt.rcParams['axes.edgecolor'] = '#CCCCCC'
+plt.rcParams['grid.color'] = '#E0E0E0'
+plt.rcParams['grid.linestyle'] = '--'
+plt.rcParams['grid.linewidth'] = 0.8
+plt.rcParams['text.color'] = '#2C3E50'
+plt.rcParams['axes.labelcolor'] = '#2C3E50'
+plt.rcParams['xtick.color'] = '#2C3E50'
+plt.rcParams['ytick.color'] = '#2C3E50'
+
+# -------
+
 
 spot_symbol = ["btc", "eth", "xrp", "sol",
                "avax", "hype", "bnb", "doge", "wld", "ltc", "pol",
@@ -204,7 +248,8 @@ async def check_signal(
                 freeUsdt=free_usdt,
                 order_value=order_result.order_value,
                 order_id=order_result.order_id,
-                footer="buy_spot.py | bybit"
+                footer="buy_spot.py | bybit",
+                timeframe=timeframe
             )
             # message = f"SAR Buy Signal detected for {symbol} at {endDate} UTC"
 #             message = f"""パラボリックSARでの買いシグナルを確認しました！

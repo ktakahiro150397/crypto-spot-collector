@@ -78,7 +78,7 @@ async def main() -> None:
             )
             freeusdt = 10.2345678
 
-            message = f""
+            message = ""
             embed = discordNotification.embed_object_create_helper(
                 symbol="BTC",
                 price=test_result.price,
@@ -86,7 +86,8 @@ async def main() -> None:
                 freeUsdt=freeusdt,
                 order_value=test_result.order_value,
                 order_id=test_result.order_id,
-                footer="buy_spot.py | bybit"
+                footer="buy_spot.py | bybit",
+                timeframe="1h"
             )
             result = await notificator.send_notification_embed_with_file(embeds=[embed],
                                                                          message=message,
