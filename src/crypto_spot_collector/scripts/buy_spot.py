@@ -37,10 +37,6 @@ notificator = discordNotification(secrets["settings"]["discordWebhookUrl"])
 importer = HistoricalDataImporter()
 logger.info("Discord notification and historical data importer initialized")
 
-timeframe = secrets["settings"]["timeframe"]
-amountByUSDT = secrets["settings"]["amountBuyUSDT"]
-logger.info(f"Amount per trade set to {amountByUSDT} USDT")
-
 bybit_exchange = BybitExchange(
     apiKey=secrets["bybit"]["apiKey"], secret=secrets["bybit"]["secret"]
 )
@@ -52,14 +48,19 @@ async def main() -> None:
     logger.info("Starting buy spot script")
 
     logger.info("---- Settings ----")
-    logger.info(f"Spot Symbols: {spot_symbol}")
-    logger.info(f"Timeframe: {timeframe}")
-    logger.info(f"AmountByUSDT: {amountByUSDT}")
     logger.info(
         f"Discord Webhook URL: {secrets['settings']['discordWebhookUrl']}")
-    logger.info("------------------")
+    logger.info(f"Spot Symbols: {spot_symbol}")
+    for setting in secrets["settings"]["timeframes"]:
+        logger.info("------------------")
+        timeframe = setting["timeframe"]
+        amountByUSDT = setting["amountBuyUSDT"]
+        consecutivePositiveCount = setting["consecutivePositiveCount"]
 
-    timeframe_delta = int(timeframe.replace("m","").replace("h","").replace("d",""))
+        logger.info(f"Timeframe: {timeframe}")
+        logger.info(f"AmountByUSDT: {amountByUSDT}")
+        logger.info(f"consecutivePositiveCount: {consecutivePositiveCount}")
+    logger.info("------------------")
 
     while True:
         # 時間足の取得・登録
@@ -84,29 +85,40 @@ async def main() -> None:
             importer.register_data(symbol.upper(), ohlcv)
             logger.debug(f"Registered OHLCV data for {symbol.upper()}")
 
-        # 現時刻が1h足の区切り目であれば1h足の取得・登録・シグナルチェックも実行
-        toJst = toDateUtc.astimezone(timezone(timedelta(hours=9)))
-        if toJst.hour % timeframe_delta == 0:
-            logger.info("Checking signals for all symbols")
-            checkEndDate = toDateUtc
-            checkStartDate = checkEndDate - timedelta(days=14)
+        for setting in secrets["settings"]["timeframes"]:
+            # spot_symbol = setting["spotSymbol"]
+            timeframe = setting["timeframe"]
+            amountByUSDT = setting["amountBuyUSDT"]
 
-            for symbol in spot_symbol:
-                logger.debug(f"Checking signal for {symbol.upper()}")
-                await check_signal(
-                    startDate=checkStartDate,
-                    endDate=checkEndDate,
-                    symbol=symbol.upper(),
-                    timeframe=timeframe,
+            timeframe_delta = int(timeframe.replace(
+                "m", "").replace("h", "").replace("d", ""))
+
+            # 現時刻が時間足の区切り目であればシグナルチェックを実行
+            toJst = toDateUtc.astimezone(timezone(timedelta(hours=9)))
+            if toJst.hour % timeframe_delta == 0:
+                logger.info(f"Checking signals... timeframe={timeframe}")
+                checkEndDate = toDateUtc
+                checkStartDate = checkEndDate - timedelta(days=14)
+
+                for symbol in spot_symbol:
+                    logger.debug(f"Checking signal for {symbol.upper()}")
+                    await check_signal(
+                        startDate=checkStartDate,
+                        endDate=checkEndDate,
+                        symbol=symbol.upper(),
+                        timeframe=timeframe,
+                        amountByUSDT=amountByUSDT,
+                        consecutivePositiveCount=consecutivePositiveCount
+                    )
+            else:
+                logger.info(
+                    f"Current hour {toJst.hour} is not a multiple of {timeframe_delta}, skipping signal check"
                 )
-        else:
-            logger.info(
-                f"Current hour {toJst.hour} is not a multiple of {timeframe_delta}, skipping signal check"
-            )
-        # 待機処理
+
+        # 次の1時間まで待機処理
         now = datetime.now(timezone.utc)
         logger.info(f"Current time: {now}")
-        next_run = (now + timedelta(hours=timeframe_delta)).replace(minute=0,
+        next_run = (now + timedelta(hours=1)).replace(minute=0,
                                                       second=0, microsecond=0)
         wait_seconds = (next_run - now).total_seconds()
         logger.info(
@@ -115,7 +127,12 @@ async def main() -> None:
 
 
 async def check_signal(
-    startDate: datetime, endDate: datetime, symbol: str, timeframe: str
+    startDate: datetime,
+    endDate: datetime,
+    symbol: str,
+    timeframe: str,
+    amountByUSDT: float,
+    consecutivePositiveCount: int
 ) -> None:
     """Check for SAR buy/sell signals and send Discord notification if detected."""
 
@@ -156,7 +173,8 @@ async def check_signal(
         df["sar_down"] = sar_indicator.psar_down()
 
         # SAR上昇シグナルをチェック
-        sar_up_signal = check_sar_signal(df["sar_up"])
+        sar_up_signal = check_sar_signal(
+            df["sar_up"], consecutivePositiveCount)
         logger.info(f"{symbol}: SAR Up Signal: {sar_up_signal}")
 
         # デバッグ用：実際の値を表示
@@ -209,7 +227,7 @@ async def check_signal(
             logger.debug(f"{symbol}: No SAR Up signal detected.")
 
 
-def check_sar_signal(sar_series: pd.Series) -> bool:
+def check_sar_signal(sar_series: pd.Series, consecutivePositiveCount: int) -> bool:
     """
     NaNから数値に切り替わって、そこから3つ連続で正の値になっている場合のみTrueを返す
     それ以上のプラス連続はFalseを返す
@@ -228,9 +246,9 @@ def check_sar_signal(sar_series: pd.Series) -> bool:
     logger.debug(f"Consecutive positive SAR values: {consecutive_positive}")
 
     # 連続する数値が3つ以外の場合はFalse
-    if consecutive_positive != 3:
+    if consecutive_positive != consecutivePositiveCount:
         logger.debug(
-            f"Signal check failed: consecutive_positive={consecutive_positive} (expected: 3)")
+            f"Signal check failed: consecutive_positive={consecutive_positive} (expected: {consecutivePositiveCount})")
         return False
 
     # 3つの数値の後にNaNがあるかチェック
@@ -238,11 +256,11 @@ def check_sar_signal(sar_series: pd.Series) -> bool:
         recent_values[consecutive_positive]
     ):
         logger.debug(
-            "SAR signal confirmed: 3 consecutive positive values after NaN")
+            f"SAR signal confirmed: {consecutivePositiveCount} consecutive positive values after NaN")
         return True
 
     logger.debug(
-        "Signal check failed: no NaN after 3 consecutive positive values")
+        f"Signal check failed: no NaN after {consecutivePositiveCount} consecutive positive values")
     return False
 
 
