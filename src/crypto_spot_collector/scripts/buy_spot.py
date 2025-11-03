@@ -57,7 +57,7 @@ plt.rcParams['ytick.color'] = '#2C3E50'
 # -------
 
 
-spot_symbol = ["btc", "eth", "xrp", "sol",
+spot_symbol = ["btc", "eth", "xrp", "sol", "link",
                "avax", "hype", "bnb", "doge", "wld", "ltc", "pol",
                "xaut",]
 
@@ -241,6 +241,7 @@ async def check_signal(
 
             # Discord通知
             free_usdt = bybit_exchange.fetch_free_usdt()
+            average_price = bybit_exchange.fetch_average_buy_price_spot(symbol)
             embed = discordNotification.embed_object_create_helper(
                 symbol=symbol,
                 price=order_result.price,
@@ -258,7 +259,9 @@ async def check_signal(
 # 残りUSDT: {free_usdt} USDT"""
             # グラフ作成
             plot_buf = [(notification_plot_buff(
-                df, symbol), f"{symbol}_sar.png")]
+                df=df,
+                symbol=symbol,
+                average_price=average_price), f"{symbol}_sar.png")]
             await notificator.send_notification_embed_with_file(
                 message="",
                 embeds=[embed],
@@ -309,7 +312,7 @@ def check_sar_signal(sar_series: pd.Series, consecutivePositiveCount: int) -> bo
     return False
 
 
-def notification_plot_buff(df: pd.DataFrame, symbol: str) -> BytesIO:
+def notification_plot_buff(df: pd.DataFrame, symbol: str, average_price: float) -> BytesIO:
     logger.debug(f"Creating plot for {symbol}")
     fig, ax1 = plt.subplots(1, 1, figsize=(12, 8))
     # 価格チャート
@@ -345,6 +348,13 @@ def notification_plot_buff(df: pd.DataFrame, symbol: str) -> BytesIO:
     ax1.set_title(f"{symbol} Price with Parabolic SAR (4h)")
     ax1.set_ylabel("Price (USD)")
     ax1.legend()
+
+    if average_price > 0:
+        ax1.axhline(average_price, color='green', ls='--', lw=1,
+                    alpha=0.7, label='Average Buy Price')
+        ax1.text(df['timestamp'].iloc[0], average_price,
+                 f" Average Buy : {average_price:.2f}",
+                 va="bottom", ha="left", fontsize=9)
 
     # 日付ラベルの重なりを防ぐ
     ax1.xaxis.set_major_formatter(mdates.DateFormatter("%m/%d %H:%M"))

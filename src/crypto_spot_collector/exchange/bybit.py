@@ -108,7 +108,7 @@ class BybitExchange():
             digit = 1
         elif symbol in ["XRP", "WLD"]:
             digit = 2
-        elif symbol in ["SOL", "AVAX", "HYPE"]:
+        elif symbol in ["SOL", "AVAX", "HYPE", "LINK"]:
             digit = 3
         elif symbol in ["BNB"]:
             digit = 4
@@ -179,4 +179,38 @@ class BybitExchange():
 
         except Exception as e:
             logger.error(f"Failed to create spot order for {symbol}: {e}")
+            raise
+
+    def fetch_average_buy_price_spot(self, symbol: str) -> float:
+        logger.debug(f"Fetching average buy price for {symbol} spot")
+        try:
+            orders = self.exchange.fetch_closed_orders(
+                symbol=f"{symbol}/USDT",
+                since=None,
+                limit=100,
+                params={}
+            )
+            buy_orders = [
+                order for order in orders if order['side'] == 'buy' and order['status'] == 'closed']
+            total_cost = sum(
+                float(order['cost']) for order in buy_orders)
+            total_amount = sum(
+                float(order['amount']) for order in buy_orders)
+
+            if total_amount == 0:
+                logger.warning(
+                    f"No completed buy orders found for {symbol} spot")
+                return 0.0
+
+            logger.debug(
+                f"Total cost: {total_cost}, Total amount: {total_amount}")
+
+            average_price = total_cost / total_amount
+            logger.info(
+                f"Average buy price for {symbol} spot: {average_price}")
+            return average_price
+
+        except Exception as e:
+            logger.error(
+                f"Failed to fetch average buy price for {symbol} spot: {e}")
             raise

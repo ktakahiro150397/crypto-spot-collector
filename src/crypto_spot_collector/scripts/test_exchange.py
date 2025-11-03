@@ -23,35 +23,38 @@ async def main() -> None:
         secret=secrets["bybit"]["secret"]
     )
 
-    xrp = bybit_exchange.fetch_price("XRP/USDT")
-    print(f"xrp price : {xrp}")
-    print(f"xrp last price : {xrp['last']}")
+    # xrp = bybit_exchange.fetch_price("XRP/USDT")
+    # print(f"xrp price : {xrp}")
+    # print(f"xrp last price : {xrp['last']}")
 
-    print(datetime.now())
-    # 過去1日のOHLCVデータを取得して登録
-    toDateUtc = datetime.now(timezone.utc)
-    fromDateUtc = toDateUtc - timedelta(days=1)
-    xrp_ohlcv = bybit_exchange.fetch_ohlcv(
-        symbol="XRP/USDT",
-        timeframe="4h",
-        fromDate=fromDateUtc,
-        toDate=toDateUtc,
-    )
-    print(f"xrp ohlcv : {xrp_ohlcv}")
+    bnb_average = bybit_exchange.fetch_average_buy_price_spot("BNB")
+    print(f"bnb average price : {bnb_average}")
 
-    # OHLCVデータの登録
-    importer = HistoricalDataImporter()
-    importer.register_data('XRP', xrp_ohlcv)
+    # print(datetime.now())
+    # # 過去1日のOHLCVデータを取得して登録
+    # toDateUtc = datetime.now(timezone.utc)
+    # fromDateUtc = toDateUtc - timedelta(days=1)
+    # xrp_ohlcv = bybit_exchange.fetch_ohlcv(
+    #     symbol="XRP/USDT",
+    #     timeframe="4h",
+    #     fromDate=fromDateUtc,
+    #     toDate=toDateUtc,
+    # )
+    # print(f"xrp ohlcv : {xrp_ohlcv}")
 
-    balance = bybit_exchange.fetch_balance()
+    # # OHLCVデータの登録
+    # importer = HistoricalDataImporter()
+    # importer.register_data('XRP', xrp_ohlcv)
 
-    for value in balance["info"]["result"]["list"]:
-        for coin in value["coin"]:
-            equity = float(coin["equity"])
-            locked = float(coin["locked"])
+    # balance = bybit_exchange.fetch_balance()
 
-            print(
-                f"{coin['coin']}: equity : {equity} | locked: {locked} | free: {equity - locked}")
+    # for value in balance["info"]["result"]["list"]:
+    #     for coin in value["coin"]:
+    #         equity = float(coin["equity"])
+    #         locked = float(coin["locked"])
+
+    #         print(
+    #             f"{coin['coin']}: equity : {equity} | locked: {locked} | free: {equity - locked}")
 
     # order_result = bybit_exchange.create_order_spot(
     #     amountByUSDT=1,

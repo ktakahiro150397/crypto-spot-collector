@@ -151,7 +151,16 @@ async def main() -> None:
             zorder=4
         )
 
-        # ax1.axhline(100000, color='green', ls='--')
+        # ax1.axhline(106000, color='green', ls='--', lw=1,
+        #             alpha=0.5, label='Target Level')
+        # ax1.text(df['timestamp'].iloc[0], 106000,
+        #          "text", va="center", ha="center")
+        average_price = 106000
+        ax1.axhline(average_price, color='green', ls='--', lw=1,
+                    alpha=0.7, label='Average Buy Price')
+        ax1.text(df['timestamp'].iloc[0], average_price,
+                 f" Average Buy : {average_price:.2f}",
+                 va="bottom", ha="left", fontsize=9)
 
         ax1.grid(True, alpha=0.3, linestyle='--', linewidth=0.8)
         ax1.set_title("BTC Price with Parabolic SAR (4h)",
