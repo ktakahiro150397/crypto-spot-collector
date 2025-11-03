@@ -260,6 +260,7 @@ async def check_signal(
             # グラフ作成
             plot_buf = [(notification_plot_buff(
                 df=df,
+                timeframe=timeframe,
                 symbol=symbol,
                 average_price=average_price), f"{symbol}_sar.png")]
             await notificator.send_notification_embed_with_file(
@@ -312,7 +313,7 @@ def check_sar_signal(sar_series: pd.Series, consecutivePositiveCount: int) -> bo
     return False
 
 
-def notification_plot_buff(df: pd.DataFrame, symbol: str, average_price: float) -> BytesIO:
+def notification_plot_buff(df: pd.DataFrame, timeframe: str, symbol: str, average_price: float) -> BytesIO:
     logger.debug(f"Creating plot for {symbol}")
     fig, ax1 = plt.subplots(1, 1, figsize=(12, 8))
     # 価格チャート
@@ -345,7 +346,7 @@ def notification_plot_buff(df: pd.DataFrame, symbol: str, average_price: float) 
     )
 
     ax1.grid(True, alpha=0.3)
-    ax1.set_title(f"{symbol} Price with Parabolic SAR (4h)")
+    ax1.set_title(f"{symbol} Price with Parabolic SAR ({timeframe})")
     ax1.set_ylabel("Price (USD)")
     ax1.legend()
 
