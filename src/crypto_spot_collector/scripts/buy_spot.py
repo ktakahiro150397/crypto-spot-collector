@@ -1,3 +1,4 @@
+import sys
 from datetime import datetime, timedelta, timezone
 from io import BytesIO
 from pathlib import Path
@@ -28,11 +29,12 @@ log_file = LOG_DIR / f"buy_spot_{datetime.now().strftime('%Y%m%d')}.log"
 # デフォルトのハンドラーを削除
 logger.remove()
 
-# 標準出力にログを表示（INFOレベル以上）
+# 標準出力にログを表示（INFOレベル以上、docker logsで確認可能）
 logger.add(
-    sink=lambda msg: print(msg, end=""),
+    sink=sys.stdout,
     format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> | <cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> - <level>{message}</level>",
-    level="INFO"
+    level="INFO",
+    colorize=True
 )
 
 # ファイルにログを保存（DEBUGレベル以上、日次ローテーション）
