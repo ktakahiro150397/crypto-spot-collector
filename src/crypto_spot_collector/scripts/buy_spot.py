@@ -16,6 +16,36 @@ from crypto_spot_collector.notification.discord import discordNotification
 from crypto_spot_collector.repository.ohlcv_repository import OHLCVRepository
 from crypto_spot_collector.scripts.import_historical_data import HistoricalDataImporter
 
+# ログ設定
+# ログフォルダのパスを取得（プロジェクトルート/logs）
+LOG_DIR = Path(__file__).parent.parent.parent.parent / "logs"
+LOG_DIR.mkdir(exist_ok=True)
+
+# ログファイル名（日付付き）
+log_file = LOG_DIR / f"buy_spot_{datetime.now().strftime('%Y%m%d')}.log"
+
+# loguruのログ設定
+# デフォルトのハンドラーを削除
+logger.remove()
+
+# 標準出力にログを表示（INFOレベル以上）
+logger.add(
+    sink=lambda msg: print(msg, end=""),
+    format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> | <cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> - <level>{message}</level>",
+    level="INFO"
+)
+
+# ファイルにログを保存（DEBUGレベル以上、日次ローテーション）
+logger.add(
+    sink=log_file,
+    format="{time:YYYY-MM-DD HH:mm:ss} | {level: <8} | {name}:{function}:{line} - {message}",
+    level="DEBUG",
+    rotation="00:00",  # 毎日0時にローテーション
+    retention="30 days",  # 30日間保持
+    compression="zip",  # 古いログファイルをzip圧縮
+    encoding="utf-8"
+)
+
 # --- seaborn 設定 ---
 # ライトテーマでいい感じのスタイルを設定
 sns.set_style("whitegrid")
