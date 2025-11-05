@@ -11,6 +11,7 @@ import pandas as pd
 import seaborn as sns
 from matplotlib import font_manager
 from matplotlib import pyplot as plt
+from PIL import Image
 from ta.trend import PSARIndicator
 
 from crypto_spot_collector.notification.discord import discordNotification
@@ -162,6 +163,14 @@ async def main() -> None:
                  f" Average Buy : {average_price:.2f}",
                  va="bottom", ha="left", fontsize=9)
 
+        limit_price = 110000
+        if limit_price > 0:
+            ax1.axhline(limit_price, color='green', ls="-", lw=1,
+                        alpha=0.7, label='Limit Buy Price')
+            ax1.text(df['timestamp'].iloc[0], limit_price,
+                     f" Limit Buy : {limit_price:.2f}",
+                     va="bottom", ha="left", fontsize=9)
+
         ax1.grid(True, alpha=0.3, linestyle='--', linewidth=0.8)
         ax1.set_title("BTC Price with Parabolic SAR (4h)",
                       fontsize=18, fontweight='bold', pad=20,
@@ -216,10 +225,37 @@ async def main() -> None:
         plt.xticks(rotation=45)
         plt.tight_layout()
 
-        # 画像をメモリ上に保存
+        # グラフをいったん保存
         img_buffer1 = BytesIO()
         plt.savefig(img_buffer1, format='png', dpi=150, bbox_inches='tight')
         img_buffer1.seek(0)
+        plt.close()
+
+        # フォトフレーム画像と合成
+        frame_image_path = Path(
+            __file__).parent / "pict" / "frame_shukishukidaishuki_wide.png"
+        if frame_image_path.exists():
+            # グラフ画像を読み込み
+            graph_img = Image.open(img_buffer1).convert("RGBA")
+            graph_width, graph_height = graph_img.size
+
+            # フレーム画像を読み込み
+            frame_img = Image.open(frame_image_path).convert("RGBA")
+
+            # フレームをグラフと同じサイズにリサイズ
+            frame_resized = frame_img.resize(
+                (graph_width, graph_height), Image.Resampling.LANCZOS)
+
+            # グラフの上にフレームを重ねる
+            # フレームを最前面に配置
+            combined_img = Image.new('RGBA', (graph_width, graph_height))
+            combined_img.paste(graph_img, (0, 0))
+            combined_img.paste(frame_resized, (0, 0), frame_resized)
+
+            # 合成画像をバッファに保存
+            img_buffer1 = BytesIO()
+            combined_img.save(img_buffer1, format='PNG')
+            img_buffer1.seek(0)
 
         notificator: discordNotification = discordNotification(webhook_url)
 

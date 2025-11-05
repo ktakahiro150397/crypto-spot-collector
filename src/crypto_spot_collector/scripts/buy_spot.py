@@ -206,6 +206,10 @@ async def check_signal(
                 for d in data
             ]
         )
+        # SMA50の計算
+        df["sma_50"] = df['close'].rolling(window=50).mean()
+        # SMA100の計算
+        df["sma_100"] = df['close'].rolling(window=100).mean()
 
         # SAR計算（初期AF=0.02, 最大AF=0.2）
         sar_indicator = PSARIndicator(
@@ -252,17 +256,14 @@ async def check_signal(
                 footer="buy_spot.py | bybit",
                 timeframe=timeframe
             )
-            # message = f"SAR Buy Signal detected for {symbol} at {endDate} UTC"
-#             message = f"""パラボリックSARでの買いシグナルを確認しました！
 
-# {symbol} を {amountByUSDT} USDT分購入しました。
-# 残りUSDT: {free_usdt} USDT"""
             # グラフ作成
             plot_buf = [(notification_plot_buff(
                 df=df,
                 timeframe=timeframe,
                 symbol=symbol,
-                average_price=average_price), f"{symbol}_sar.png")]
+                average_price=average_price,
+                limit_price=order_result.price), f"{symbol}_sar.png")]
             await notificator.send_notification_embed_with_file(
                 message="",
                 embeds=[embed],
@@ -313,7 +314,7 @@ def check_sar_signal(sar_series: pd.Series, consecutivePositiveCount: int) -> bo
     return False
 
 
-def notification_plot_buff(df: pd.DataFrame, timeframe: str, symbol: str, average_price: float) -> BytesIO:
+def notification_plot_buff(df: pd.DataFrame, timeframe: str, symbol: str, average_price: float, limit_price: float) -> BytesIO:
     logger.debug(f"Creating plot for {symbol}")
     fig, ax1 = plt.subplots(1, 1, figsize=(12, 8))
     # 価格チャート
@@ -345,6 +346,18 @@ def notification_plot_buff(df: pd.DataFrame, timeframe: str, symbol: str, averag
         alpha=0.8,
     )
 
+    # SMA50（オレンジゴールド）
+    ax1.plot(
+        df['timestamp'],
+        df['sma_50'],
+        label="SMA 50",
+        color='#FFA726',
+        linewidth=2.2,
+        alpha=0.85,
+        linestyle='-',
+        zorder=2
+    )
+
     ax1.grid(True, alpha=0.3)
     ax1.set_title(f"{symbol} Price with Parabolic SAR ({timeframe})")
     ax1.set_ylabel("Price (USD)")
@@ -355,6 +368,13 @@ def notification_plot_buff(df: pd.DataFrame, timeframe: str, symbol: str, averag
                     alpha=0.7, label='Average Buy Price')
         ax1.text(df['timestamp'].iloc[0], average_price,
                  f" Average Buy : {average_price:.2f}",
+                 va="bottom", ha="left", fontsize=9)
+
+    if limit_price > 0:
+        ax1.axhline(limit_price, color='green', ls="-", lw=1,
+                    alpha=0.7, label='Limit Buy Price')
+        ax1.text(df['timestamp'].iloc[0], limit_price,
+                 f" Limit Buy : {limit_price:.2f}",
                  va="bottom", ha="left", fontsize=9)
 
     # 日付ラベルの重なりを防ぐ
