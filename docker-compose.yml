@@ -5,6 +5,7 @@ services:
       dockerfile: Dockerfile
     volumes:
       - ./secrets.json:/app/crypto_spot_collector/scripts/secrets.json:ro
+      - ./logs:/app/crypto_spot_collector/scripts/logs
     # command: sleep infinity
     command: uv run crypto_spot_collector/scripts/buy_spot.py
     depends_on:
@@ -13,7 +14,7 @@ services:
       - crypto-network
     environment:
       - DATABASE_URL=mysql://crypto_user:crypto_pass@mysql:3306/crypto_pachinko
-  
+
   mysql:
     image: mysql:8.0
     restart: unless-stopped
@@ -32,6 +33,7 @@ services:
 
 volumes:
   mysql-data:
+
 
 networks:
   crypto-network:
