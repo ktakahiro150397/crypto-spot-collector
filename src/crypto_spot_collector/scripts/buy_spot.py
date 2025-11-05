@@ -137,6 +137,16 @@ async def main() -> None:
     logger.info("------------------")
 
     while True:
+        # 次の1時間まで待機処理
+        now = datetime.now(timezone.utc)
+        logger.info(f"Current time: {now}")
+        next_run = (now + timedelta(hours=1)).replace(minute=0,
+                                                      second=0, microsecond=0)
+        wait_seconds = (next_run - now).total_seconds()
+        logger.info(
+            f"Waiting for {wait_seconds} seconds until next run at {next_run} UTC")
+        await asyncio.sleep(wait_seconds)
+
         # 時間足の取得・登録
         toDateUtc = datetime.now(timezone.utc).replace(
             minute=0, second=0, microsecond=0
@@ -188,16 +198,6 @@ async def main() -> None:
                 logger.info(
                     f"Current hour {toJst.hour} is not a multiple of {timeframe_delta}, skipping signal check"
                 )
-
-        # 次の1時間まで待機処理
-        now = datetime.now(timezone.utc)
-        logger.info(f"Current time: {now}")
-        next_run = (now + timedelta(hours=1)).replace(minute=0,
-                                                      second=0, microsecond=0)
-        wait_seconds = (next_run - now).total_seconds()
-        logger.info(
-            f"Waiting for {wait_seconds} seconds until next run at {next_run} UTC")
-        await asyncio.sleep(wait_seconds)
 
 
 async def check_signal(
