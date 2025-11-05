@@ -173,6 +173,7 @@ async def main() -> None:
             # spot_symbol = setting["spotSymbol"]
             timeframe = setting["timeframe"]
             amountByUSDT = setting["amountBuyUSDT"]
+            consecutivePositiveCount = setting["consecutivePositiveCount"]
 
             timeframe_delta = int(timeframe.replace(
                 "m", "").replace("h", "").replace("d", ""))
