@@ -19,6 +19,15 @@ class SpotOrderResult:
     original_order: Any  # 元のorder情報
 
 
+@dataclass
+class SpotAsset:
+    """スポット資産の情報を格納するクラス"""
+    symbol: str
+    total_amount: float  # 総数量
+    current_value: float  # 現在価値
+    profit_loss: float  # 損益
+
+
 class BybitExchange():
     def __init__(self, apiKey: str, secret: str) -> None:
         logger.info("Initializing Bybit exchange client")
@@ -219,3 +228,73 @@ class BybitExchange():
             logger.error(
                 f"Failed to fetch average buy price for {symbol} spot: {e}")
             raise
+
+    def get_current_spot_pnl(self, symbol: str) -> float:
+        try:
+            orders = self.exchange.fetch_closed_orders(
+                symbol=f"{symbol}/USDT",
+                since=None,
+                limit=100,
+                params={}
+            )
+            buy_orders = [
+                order for order in orders if order['side'] == 'buy' and order['status'] == 'closed']
+            total_cost = sum(
+                float(order['cost']) for order in buy_orders)
+            total_amount = sum(
+                float(order['amount']) for order in buy_orders)
+
+            if total_amount == 0:
+                logger.warning(
+                    f"No completed buy orders found for {symbol} spot")
+                return 0.0
+
+            logger.debug(
+                f"Total cost: {total_cost}, Total amount: {total_amount}")
+
+            average_price = total_cost / total_amount
+            logger.info(
+                f"Average buy price for {symbol} spot: {average_price}")
+
+            current_price = self.fetch_price(f"{symbol}/USDT")["last"]
+            pnl = round((current_price - average_price) * total_amount, 5)
+            logger.info(
+                f"Current PnL for {symbol} spot: {pnl} (Current Price: {current_price})")
+
+            return float(pnl)
+        except Exception as e:
+            logger.error(
+                f"Failed to fetch average buy price for {symbol} spot: {e}")
+            raise
+
+    def get_spot_portfolio(self) -> list[SpotAsset]:
+        portfolio: list[SpotAsset] = []
+        balance = self.fetch_balance()
+
+        for value in balance["info"]["result"]["list"]:
+            for coin in value["coin"]:
+                logger.debug(f"Processing coin: {coin['coin']}")
+                equity = float(coin["equity"])
+
+                pnl = 0.0
+                current_value = equity
+                if not coin["coin"] == "USDT":
+                    pnl = self.get_current_spot_pnl(coin["coin"])
+                    current_value = self.fetch_price(
+                        f"{coin['coin']}/USDT")["last"] * equity
+
+                spot_asset = SpotAsset(
+                    symbol=coin["coin"],
+                    total_amount=equity,
+                    current_value=current_value,
+                    profit_loss=pnl
+                )
+                portfolio.append(spot_asset)
+
+                # if free > 0 and coin["coin"] != "USDT":
+                #     portfolio[coin["coin"]] = free
+                #     logger.debug(
+                #         f"Spot portfolio - {coin['coin']}: free amount: {free}")
+
+        logger.info("Spot portfolio fetched.")
+        return portfolio

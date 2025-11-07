@@ -23,12 +23,26 @@ async def main() -> None:
         secret=secrets["bybit"]["secret"]
     )
 
+    portfolio = bybit_exchange.get_spot_portfolio()
+    print("spot portfolio:")
+    for asset in portfolio:
+        print(
+            f"Asset: {asset.symbol} | Total Amount: {asset.total_amount} | Current Value: {asset.current_value} | PnL: {asset.profit_loss}"
+        )
+
+    # overall_pnl = 0.0
+    # for asset in portfolio:
+    #     result = bybit_exchange.get_current_spot_pnl("XAUT")
+    #     print(f"{asset} PnL: {result}")
+    #     overall_pnl += result
+    # print(f"Overall PnL: {overall_pnl}")
+
     # xrp = bybit_exchange.fetch_price("XRP/USDT")
     # print(f"xrp price : {xrp}")
     # print(f"xrp last price : {xrp['last']}")
 
-    result = bybit_exchange.create_order_spot(1, "DOGE")
-    print(f"order result : {result}")
+    # result = bybit_exchange.create_order_spot(1, "DOGE")
+    # print(f"order result : {result}")
 
     # bnb_average = bybit_exchange.fetch_average_buy_price_spot("BNB")
     # print(f"bnb average price : {bnb_average}")
