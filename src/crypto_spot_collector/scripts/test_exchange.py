@@ -27,8 +27,11 @@ async def main() -> None:
     # print(f"xrp price : {xrp}")
     # print(f"xrp last price : {xrp['last']}")
 
-    bnb_average = bybit_exchange.fetch_average_buy_price_spot("BNB")
-    print(f"bnb average price : {bnb_average}")
+    result = bybit_exchange.create_order_spot(1, "DOGE")
+    print(f"order result : {result}")
+
+    # bnb_average = bybit_exchange.fetch_average_buy_price_spot("BNB")
+    # print(f"bnb average price : {bnb_average}")
 
     # print(datetime.now())
     # # 過去1日のOHLCVデータを取得して登録

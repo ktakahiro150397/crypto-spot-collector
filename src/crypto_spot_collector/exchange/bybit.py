@@ -103,38 +103,42 @@ class BybitExchange():
         logger.info(
             f"Creating spot order for {symbol} with {amountByUSDT} USDT")
 
-        # 価格の精度を調整
+        # 数量（個数）の精度を設定
         if symbol in ["POL", "DOGE"]:
-            digit = 1
+            amount_digit = 1  # 0.1単位
         elif symbol in ["XRP", "WLD"]:
-            digit = 2
+            amount_digit = 2  # 0.01単位
         elif symbol in ["SOL", "AVAX", "HYPE", "LINK"]:
-            digit = 3
+            amount_digit = 3  # 0.001単位
         elif symbol in ["BNB"]:
-            digit = 4
+            amount_digit = 4  # 0.0001単位
         elif symbol in ["ETH", "LTC", "XAUT"]:
-            digit = 5
+            amount_digit = 5  # 0.00001単位
         elif symbol in ["BTC"]:
-            digit = 6
+            amount_digit = 6  # 0.000001単位
         else:
             logger.error(f"Unsupported symbol {symbol} for spot order")
             raise Exception(f"Unsupported symbol {symbol} for spot order")
 
-        logger.debug(f"Using precision digit: {digit} for {symbol}")
+        # 価格は常に5桁の精度
+        price_digit = 5
+
+        logger.debug(
+            f"Using amount precision: {amount_digit}, price precision: {price_digit} for {symbol}")
 
         if not symbol.endswith("/USDT"):
             symbol = f"{symbol}/USDT"
 
         current_price = self.fetch_price(symbol)["last"]
         limit_price = current_price * 0.995  # 0.5%安い価格で指値買い
-        limit_price = round(limit_price, digit)
+        limit_price = round(limit_price, price_digit)
 
         logger.debug(
             f"Current price: {current_price}, Limit price: {limit_price}")
 
         # 希望注文額から数量を計算
         buy_amount = amountByUSDT / limit_price
-        buy_amount = round(buy_amount, digit)
+        buy_amount = round(buy_amount, amount_digit)
 
         # 精度調整後に注文額が1USDT未満になる場合、1USDTを超える最小値に調整
         order_value = buy_amount * limit_price
@@ -142,11 +146,12 @@ class BybitExchange():
             logger.debug(
                 f"Order value {order_value} < 1 USDT, adjusting amount")
             # 1USDTを超える最小の数量を計算
-            buy_amount = round(1 / limit_price, digit)
+            buy_amount = round(1 / limit_price, amount_digit)
             # 丸めた結果がまだ1未満の場合、最小単位ずつ増やす
-            min_increment = 10 ** (-digit)  # digit=3なら0.001、digit=2なら0.01
+            # amount_digit=3なら0.001、amount_digit=2なら0.01
+            min_increment = 10 ** (-amount_digit)
             while buy_amount * limit_price < 1:
-                buy_amount = round(buy_amount + min_increment, digit)
+                buy_amount = round(buy_amount + min_increment, amount_digit)
             logger.debug(f"Adjusted buy amount: {buy_amount}")
 
         final_order_value = buy_amount * limit_price
