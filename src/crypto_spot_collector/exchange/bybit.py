@@ -291,10 +291,8 @@ class BybitExchange():
                 )
                 portfolio.append(spot_asset)
 
-                # if free > 0 and coin["coin"] != "USDT":
-                #     portfolio[coin["coin"]] = free
-                #     logger.debug(
-                #         f"Spot portfolio - {coin['coin']}: free amount: {free}")
+        # USDTを先頭に移動
+        portfolio.sort(key=lambda x: (x.symbol != "USDT", x.symbol))
 
         logger.info("Spot portfolio fetched.")
         return portfolio

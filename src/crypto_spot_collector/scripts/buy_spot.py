@@ -202,6 +202,10 @@ async def main() -> None:
                     f"Current hour {toJst.hour} is not a multiple of {timeframe_delta}, skipping signal check"
                 )
 
+        if toJst.hour == 0:
+            # 毎日0時に成績通知
+            await notify_current_portfolio()
+
 
 async def check_signal(
     startDate: datetime,
@@ -308,6 +312,15 @@ async def check_signal(
                 logger.debug(f"  {i}: {sar_up}")
         else:
             logger.debug(f"{symbol}: No SAR Up signal detected.")
+
+
+async def notify_current_portfolio() -> None:
+    portfolio_img = notification_current_portfolio()
+    if portfolio_img is not None:
+        plot_buf = [(portfolio_img, "spot_portfolio.png")]
+        await notificator.send_notification_with_image_async(
+            "現時点の成績です！", plot_buf
+        )
 
 
 def check_sar_signal(sar_series: pd.Series, consecutivePositiveCount: int) -> bool:
@@ -424,6 +437,68 @@ def notification_plot_buff(df: pd.DataFrame, timeframe: str, symbol: str, averag
 
     logger.debug(f"Plot for {symbol} created successfully")
     return img_buffer1
+
+
+def notification_current_portfolio() -> BytesIO:
+    """Fetch current spot portfolio and send Discord notification with analysis graph."""
+    portfolio = bybit_exchange.get_spot_portfolio()
+    if len(portfolio) > 0:
+        df = pd.DataFrame(
+            [
+                {
+                    "Symbol": asset.symbol,
+                    "Total_Amount": asset.total_amount,
+                    "Current_Value": asset.current_value,
+                    "PnL": asset.profit_loss,
+                }
+                for asset in portfolio
+            ]
+        )
+
+        # サブプロットの作成
+        fig, axes = plt.subplots(1, 2, figsize=(15, 6))
+        fig.suptitle('Cryptocurrency Portfolio Analysis', fontsize=16)
+
+        # 1. 現在価値の棒グラフ
+        axes[0].bar(df['Symbol'], df['Current_Value'])
+        axes[0].set_title('Current Value by Asset')
+        axes[0].set_ylabel('Value (USDT)')
+        axes[0].tick_params(axis='x', rotation=45)
+
+        # 2. PnLの棒グラフ（正負で色分け）
+        colors = ['green' if x >= 0 else 'red' for x in df['PnL']]
+        axes[1].bar(df['Symbol'], df['PnL'], color=colors)
+        axes[1].set_title('Profit & Loss by Asset')
+        axes[1].set_ylabel('PnL (USDT)')
+        axes[1].tick_params(axis='x', rotation=45)
+        axes[1].axhline(y=0, color='black', linestyle='-', alpha=0.3)
+
+        plt.tight_layout()
+
+        # 画像をメモリ上に保存
+        img_buffer1 = BytesIO()
+        plt.savefig(img_buffer1, format="png", dpi=150, bbox_inches="tight")
+        img_buffer1.seek(0)
+
+        return img_buffer1
+    else:
+        logger.warning("Spot portfolio is empty, creating empty graph.")
+        # 空のポートフォリオ用のグラフを作成
+        fig, ax = plt.subplots(1, 1, figsize=(10, 6))
+        ax.text(0.5, 0.5, 'No Portfolio Data Available',
+                ha='center', va='center', fontsize=16,
+                transform=ax.transAxes)
+        ax.set_title('Cryptocurrency Portfolio Analysis')
+        ax.axis('off')
+
+        plt.tight_layout()
+
+        # 画像をメモリ上に保存
+        img_buffer1 = BytesIO()
+        plt.savefig(img_buffer1, format="png", dpi=150, bbox_inches="tight")
+        img_buffer1.seek(0)
+
+        return img_buffer1
 
 
 if __name__ == "__main__":
