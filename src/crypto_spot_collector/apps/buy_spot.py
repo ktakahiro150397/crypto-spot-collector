@@ -2,7 +2,6 @@ import sys
 from datetime import datetime, timedelta, timezone
 from io import BytesIO
 from pathlib import Path
-from typing import Any
 
 import matplotlib.dates as mdates
 import pandas as pd
@@ -16,6 +15,7 @@ from crypto_spot_collector.apps.import_historical_data import HistoricalDataImpo
 from crypto_spot_collector.exchange.bybit import BybitExchange
 from crypto_spot_collector.notification.discord import discordNotification
 from crypto_spot_collector.repository.ohlcv_repository import OHLCVRepository
+from crypto_spot_collector.utils.secrets import load_secrets
 
 # ログ設定
 # ログフォルダのパスを取得（プロジェクトルート/logs）
@@ -94,20 +94,21 @@ spot_symbol = ["btc", "eth", "xrp", "sol", "link",
                "xaut",]
 
 
-def load_secrets() -> Any:
-    import json
-    from pathlib import Path
+# def load_secrets() -> Any:
+#     import json
+#     from pathlib import Path
 
-    secrets_path = Path(__file__).parent / "secrets.json"
-    logger.info(f"Loading secrets from {secrets_path}")
-    with open(secrets_path, "r") as f:
-        secrets = json.load(f)
-    logger.info("Secrets loaded successfully")
-    return secrets
+#     secrets_path = Path(__file__).parent / "secrets.json"
+#     logger.info(f"Loading secrets from {secrets_path}")
+#     with open(secrets_path, "r") as f:
+#         secrets = json.load(f)
+#     logger.info("Secrets loaded successfully")
+#     return secrets
 
 
 logger.info("Initializing crypto spot collector script")
-secrets = load_secrets()
+secret_file = Path(__file__).parent / "secrets.json"
+secrets = load_secrets(secret_file)
 
 notificator = discordNotification(secrets["settings"]["discordWebhookUrl"])
 importer = HistoricalDataImporter()

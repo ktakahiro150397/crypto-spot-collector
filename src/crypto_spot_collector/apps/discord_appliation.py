@@ -7,6 +7,11 @@ import discord
 from discord.ext import commands
 from loguru import logger
 
+from crypto_spot_collector.exchange.bybit import BybitExchange
+
+# from crypto_spot_collector.discord.cogs.greet import GreetCog
+from crypto_spot_collector.utils.secrets import load_secrets
+
 intents = discord.Intents.default()
 bot = commands.Bot(command_prefix="!", intents=intents)
 
@@ -41,18 +46,38 @@ logger.add(
     encoding="utf-8"
 )
 
+# ログ設定
+# ログフォルダのパスを取得（プロジェクトルート/logs）
+LOG_DIR = Path(__file__).parent.parent.parent.parent / "logs"
+LOG_DIR.mkdir(exist_ok=True)
+# ログファイル名（日付付き）
+log_file = LOG_DIR / f"buy_spot_{datetime.now().strftime('%Y%m%d')}.log"
+
+secret_file = Path(__file__).parent / "secrets.json"
+secrets = load_secrets(secret_file)
+
+BOT_TOKEN = secrets["settings"]["discordBotToken"]
+
 
 @bot.event
 async def on_ready() -> None:
     logger.info(f'{bot.user} がログインしました')
     # Cogを読み込んだ後に同期するのが確実
     await bot.tree.sync()
+    logger.info("コマンドが同期されました")
 
 
 async def main() -> None:
     # 拡張機能（Cog）を読み込む
-    await bot.load_extension("cogs.greet")
-    await bot.start("YOUR_BOT_TOKEN")
+
+    bot.bybit_exchange = BybitExchange(
+        apiKey=secrets["bybit"]["apiKey"],
+        secret=secrets["bybit"]["secret"]
+    )  # type: ignore
+
+    await bot.load_extension("crypto_spot_collector.discord.cogs.greet")
+    await bot.load_extension("crypto_spot_collector.discord.cogs.pnl")
+    await bot.start(BOT_TOKEN)
 
 if __name__ == "__main__":
     asyncio.run(main())
