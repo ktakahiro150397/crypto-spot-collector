@@ -19,7 +19,7 @@ from crypto_spot_collector.utils.secrets import load_secrets
 
 # ログ設定
 # ログフォルダのパスを取得（プロジェクトルート/logs）
-LOG_DIR = Path(__file__).parent.parent.parent.parent / "logs"
+LOG_DIR = Path(__file__).parent / "logs"
 LOG_DIR.mkdir(exist_ok=True)
 
 # ログファイル名（日付付き）
