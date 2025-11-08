@@ -93,19 +93,6 @@ spot_symbol = ["btc", "eth", "xrp", "sol", "link",
                "avax", "hype", "bnb", "doge", "wld", "ltc", "pol",
                "xaut",]
 
-
-# def load_secrets() -> Any:
-#     import json
-#     from pathlib import Path
-
-#     secrets_path = Path(__file__).parent / "secrets.json"
-#     logger.info(f"Loading secrets from {secrets_path}")
-#     with open(secrets_path, "r") as f:
-#         secrets = json.load(f)
-#     logger.info("Secrets loaded successfully")
-#     return secrets
-
-
 logger.info("Initializing crypto spot collector script")
 secret_file = Path(__file__).parent / "secrets.json"
 secrets = load_secrets(secret_file)
@@ -203,9 +190,9 @@ async def main() -> None:
                     f"Current hour {toJst.hour} is not a multiple of {timeframe_delta}, skipping signal check"
                 )
 
-        if toJst.hour == 0:
-            # 毎日0時に成績通知
-            await notify_current_portfolio()
+        # if toJst.hour == 0:
+        #     # 毎日0時に成績通知
+        #     await notify_current_portfolio()
 
 
 async def check_signal(
