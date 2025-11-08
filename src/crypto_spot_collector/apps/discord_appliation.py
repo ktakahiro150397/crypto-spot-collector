@@ -67,6 +67,14 @@ async def on_ready() -> None:
     await bot.tree.sync()
     logger.info("コマンドが同期されました")
 
+    activity = discord.CustomActivity(
+        name=f"Crypto Spot Collector | version={bot.version}"
+    )
+
+    await bot.change_presence(
+        activity=activity
+    )
+
 
 async def main() -> None:
     # 拡張機能（Cog）を読み込む
