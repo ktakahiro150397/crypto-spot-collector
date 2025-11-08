@@ -61,6 +61,7 @@ BOT_TOKEN = secrets["settings"]["discordBotToken"]
 
 @bot.event
 async def on_ready() -> None:
+    logger.info(f"Bot is ready. Version : {bot.version}")
     logger.info(f'{bot.user} がログインしました')
     # Cogを読み込んだ後に同期するのが確実
     await bot.tree.sync()
@@ -74,8 +75,9 @@ async def main() -> None:
         apiKey=secrets["bybit"]["apiKey"],
         secret=secrets["bybit"]["secret"]
     )  # type: ignore
+    bot.version = secrets["settings"]["version"]
 
-    await bot.load_extension("crypto_spot_collector.discord.cogs.greet")
+    # await bot.load_extension("crypto_spot_collector.discord.cogs.greet")
     await bot.load_extension("crypto_spot_collector.discord.cogs.pnl")
     await bot.start(BOT_TOKEN)
 
