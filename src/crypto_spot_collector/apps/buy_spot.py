@@ -12,10 +12,10 @@ from matplotlib import font_manager
 from matplotlib import pyplot as plt
 from ta.trend import PSARIndicator
 
+from crypto_spot_collector.apps.import_historical_data import HistoricalDataImporter
 from crypto_spot_collector.exchange.bybit import BybitExchange
 from crypto_spot_collector.notification.discord import discordNotification
 from crypto_spot_collector.repository.ohlcv_repository import OHLCVRepository
-from crypto_spot_collector.scripts.import_historical_data import HistoricalDataImporter
 
 # ログ設定
 # ログフォルダのパスを取得（プロジェクトルート/logs）

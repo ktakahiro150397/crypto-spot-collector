@@ -19,6 +19,7 @@ dependencies = [
     "ta>=0.11.0",
     "ccxt>=4.5.12",
     "seaborn>=0.13.2",
+    "discord-py>=2.6.4",
 ]
 
 [project.scripts]

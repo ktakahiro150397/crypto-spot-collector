@@ -4,10 +4,10 @@ services:
       context: .
       dockerfile: Dockerfile
     volumes:
-      - ./secrets.json:/app/crypto_spot_collector/scripts/secrets.json:ro
+      - ./src/crypto_spot_collector/apps/secrets.json:/app/crypto_spot_collector/apps/secrets.json:ro
       - ./logs:/app/crypto_spot_collector/scripts/logs
     # command: sleep infinity
-    command: uv run crypto_spot_collector/scripts/buy_spot.py
+    command: uv run crypto_spot_collector/apps/buy_spot.py
     depends_on:
       - mysql
     networks:
@@ -33,7 +33,6 @@ services:
 
 volumes:
   mysql-data:
-
 
 networks:
   crypto-network:
