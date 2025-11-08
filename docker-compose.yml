@@ -15,6 +15,22 @@ services:
     environment:
       - DATABASE_URL=mysql://crypto_user:crypto_pass@mysql:3306/crypto_pachinko
 
+  bot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    volumes:
+      - ./src/crypto_spot_collector/apps/secrets.json:/app/crypto_spot_collector/apps/secrets.json:ro
+      - ./logs:/app/crypto_spot_collector/scripts/logs
+    # command: sleep infinity
+    command: uv run crypto_spot_collector/apps/discord_appliation.py
+    depends_on:
+      - mysql
+    networks:
+      - crypto-network
+    environment:
+      - DATABASE_URL=mysql://crypto_user:crypto_pass@mysql:3306/crypto_pachinko
+
   mysql:
     image: mysql:8.0
     restart: unless-stopped
@@ -33,6 +49,7 @@ services:
 
 volumes:
   mysql-data:
+
 
 networks:
   crypto-network:
