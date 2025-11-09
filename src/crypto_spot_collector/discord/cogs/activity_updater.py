@@ -24,6 +24,7 @@ class ActivityUpdaterCog(commands.Cog):
 
             # Get portfolio data
             portfolio = self.exchange.get_spot_portfolio()
+            free_usdt = self.exchange.fetch_free_usdt()
 
             # Calculate total PnL
             total_pnl = sum(
@@ -52,7 +53,7 @@ class ActivityUpdaterCog(commands.Cog):
 
             activity_text = (
                 f"PnL : {pnl_str} USDT ({pnl_pct_str}%) | "
-                f"Update : {jst_time_str} | "
+                f"Updated On : {jst_time_str} | "
                 f"Version : {self.bot.version}"  # type: ignore
             )
 
@@ -60,9 +61,23 @@ class ActivityUpdaterCog(commands.Cog):
             await self.bot.change_presence(activity=activity)
 
             # Update the bot's application description
-            self.bot.application.edit({
-                "description": activity_text
-            })
+            if self.bot.application is not None:
+                description_text = (
+                    f"PnL : {pnl_str} USDT ({pnl_pct_str}%)\n"
+                    f"Update : {jst_time_str}\n"
+                    f"Version : {self.bot.version}\n\n"  # type: ignore
+                    f"--- Portfolio Details ---\n"
+                )
+                description_text += f"Free USDT : ${free_usdt:.2f}\n\n"
+                for asset in portfolio:
+                    if asset.symbol != "USDT":
+                        description_text += (
+                            f"{asset.symbol:<4} : {asset.profit_loss:>+6.2f}%\n"
+                        )
+
+                await self.bot.application.edit(description=description_text)
+                logger.debug(
+                    f"Bot application description updated : {description_text}")
 
             logger.debug(f"Activity updated: {activity_text}")
         except Exception as e:
