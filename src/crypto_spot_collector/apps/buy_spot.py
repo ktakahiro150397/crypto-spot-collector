@@ -2,7 +2,6 @@ import sys
 from datetime import datetime, timedelta, timezone
 from io import BytesIO
 from pathlib import Path
-from typing import Any
 
 import matplotlib.dates as mdates
 import pandas as pd
@@ -12,14 +11,15 @@ from matplotlib import font_manager
 from matplotlib import pyplot as plt
 from ta.trend import PSARIndicator
 
+from crypto_spot_collector.apps.import_historical_data import HistoricalDataImporter
 from crypto_spot_collector.exchange.bybit import BybitExchange
 from crypto_spot_collector.notification.discord import discordNotification
 from crypto_spot_collector.repository.ohlcv_repository import OHLCVRepository
-from crypto_spot_collector.scripts.import_historical_data import HistoricalDataImporter
+from crypto_spot_collector.utils.secrets import load_secrets
 
 # ログ設定
 # ログフォルダのパスを取得（プロジェクトルート/logs）
-LOG_DIR = Path(__file__).parent.parent.parent.parent / "logs"
+LOG_DIR = Path(__file__).parent / "logs"
 LOG_DIR.mkdir(exist_ok=True)
 
 # ログファイル名（日付付き）
@@ -93,21 +93,9 @@ spot_symbol = ["btc", "eth", "xrp", "sol", "link",
                "avax", "hype", "bnb", "doge", "wld", "ltc", "pol",
                "xaut",]
 
-
-def load_secrets() -> Any:
-    import json
-    from pathlib import Path
-
-    secrets_path = Path(__file__).parent / "secrets.json"
-    logger.info(f"Loading secrets from {secrets_path}")
-    with open(secrets_path, "r") as f:
-        secrets = json.load(f)
-    logger.info("Secrets loaded successfully")
-    return secrets
-
-
 logger.info("Initializing crypto spot collector script")
-secrets = load_secrets()
+secret_file = Path(__file__).parent / "secrets.json"
+secrets = load_secrets(secret_file)
 
 notificator = discordNotification(secrets["settings"]["discordWebhookUrl"])
 importer = HistoricalDataImporter()
@@ -202,9 +190,9 @@ async def main() -> None:
                     f"Current hour {toJst.hour} is not a multiple of {timeframe_delta}, skipping signal check"
                 )
 
-        if toJst.hour == 0:
-            # 毎日0時に成績通知
-            await notify_current_portfolio()
+        # if toJst.hour == 0:
+        #     # 毎日0時に成績通知
+        #     await notify_current_portfolio()
 
 
 async def check_signal(
