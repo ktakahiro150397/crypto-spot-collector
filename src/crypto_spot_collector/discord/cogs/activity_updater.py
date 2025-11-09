@@ -59,6 +59,11 @@ class ActivityUpdaterCog(commands.Cog):
             activity = discord.CustomActivity(name=activity_text)
             await self.bot.change_presence(activity=activity)
 
+            # Update the bot's application description
+            self.bot.application.edit({
+                "description": activity_text
+            })
+
             logger.debug(f"Activity updated: {activity_text}")
         except Exception as e:
             logger.error(f"Error updating bot activity: {e}")
