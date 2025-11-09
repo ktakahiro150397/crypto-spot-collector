@@ -21,7 +21,8 @@ LOG_DIR = Path(__file__).parent / "logs"
 LOG_DIR.mkdir(exist_ok=True)
 
 # ログファイル名（日付付き）
-log_file = LOG_DIR / f"buy_spot_{datetime.now().strftime('%Y%m%d')}.log"
+log_file = LOG_DIR / \
+    f"discord_application_{datetime.now().strftime('%Y%m%d')}.log"
 
 # loguruのログ設定
 # デフォルトのハンドラーを削除
