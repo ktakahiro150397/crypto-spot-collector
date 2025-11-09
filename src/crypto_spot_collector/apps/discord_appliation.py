@@ -63,7 +63,7 @@ BOT_TOKEN = secrets["settings"]["discordBotToken"]
 
 @bot.event
 async def on_ready() -> None:
-    logger.info(f"Bot is ready. Version : {bot.version}")
+    logger.info(f"Bot is ready. Version : {bot.version}")  # type: ignore
     logger.info(f'{bot.user} がログインしました')
     # Cogを読み込んだ後に同期するのが確実
     await bot.tree.sync()
@@ -73,11 +73,11 @@ async def on_ready() -> None:
 async def main() -> None:
     # 拡張機能（Cog）を読み込む
 
-    bot.bybit_exchange = BybitExchange(
+    bot.bybit_exchange = BybitExchange(   # type: ignore
         apiKey=secrets["bybit"]["apiKey"],
         secret=secrets["bybit"]["secret"]
     )  # type: ignore
-    bot.version = secrets["settings"]["version"]
+    bot.version = secrets["settings"]["version"]   # type: ignore
 
     # await bot.load_extension("crypto_spot_collector.discord.cogs.greet")
     await bot.load_extension("crypto_spot_collector.discord.cogs.pnl")

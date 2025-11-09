@@ -46,14 +46,13 @@ class ActivityUpdaterCog(commands.Cog):
                 ) * 100
 
             # Format activity string
-            pnl_str = f"{total_pnl:+.2f}"
+            pnl_str = f"{total_pnl:+.2f} USDT"
             pnl_pct_str = f"{total_pnl_percent:+.2f}"
             jst_time_str = datetime.now(timezone.utc).astimezone(
                 timezone(timedelta(hours=9))).strftime('%H:%M')
 
             activity_text = (
-                f"PnL : {pnl_str} USDT ({pnl_pct_str}%) | "
-                f"Updated On : {jst_time_str} | "
+                f"PnL : {pnl_str} ({pnl_pct_str}%) | "
                 f"Version : {self.bot.version}"  # type: ignore
             )
 
