@@ -11,6 +11,7 @@ from crypto_spot_collector.exchange.bybit import BybitExchange
 
 # from crypto_spot_collector.discord.cogs.greet import GreetCog
 from crypto_spot_collector.utils.secrets import load_secrets
+from crypto_spot_collector.utils.version import get_version_from_git
 
 intents = discord.Intents.default()
 bot = commands.Bot(command_prefix="!", intents=intents)
@@ -77,7 +78,7 @@ async def main() -> None:
         apiKey=secrets["bybit"]["apiKey"],
         secret=secrets["bybit"]["secret"]
     )  # type: ignore
-    bot.version = secrets["settings"]["version"]   # type: ignore
+    bot.version = get_version_from_git()   # type: ignore
 
     # await bot.load_extension("crypto_spot_collector.discord.cogs.greet")
     await bot.load_extension("crypto_spot_collector.discord.cogs.pnl")
