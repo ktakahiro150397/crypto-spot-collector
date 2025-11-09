@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 
 import discord
 from discord.ext import commands, tasks
@@ -47,9 +47,12 @@ class ActivityUpdaterCog(commands.Cog):
             # Format activity string
             pnl_str = f"{total_pnl:+.2f}"
             pnl_pct_str = f"{total_pnl_percent:+.2f}"
+            jst_time_str = datetime.now(timezone.utc).astimezone(
+                timezone(timedelta(hours=9))).strftime('%H:%M')
+
             activity_text = (
                 f"PnL : {pnl_str} USDT ({pnl_pct_str}%) | "
-                f"Update : {datetime.now().strftime('%H:%M')} | "
+                f"Update : {jst_time_str} | "
                 f"Version : {self.bot.version}"  # type: ignore
             )
 
