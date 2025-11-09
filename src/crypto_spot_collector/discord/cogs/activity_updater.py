@@ -1,3 +1,5 @@
+from datetime import datetime
+
 import discord
 from discord.ext import commands, tasks
 from loguru import logger
@@ -11,10 +13,10 @@ class ActivityUpdaterCog(commands.Cog):
         self.exchange = exchange
         self.update_activity.start()
 
-    def cog_unload(self) -> None:
+    async def cog_unload(self) -> None:
         self.update_activity.cancel()
 
-    @tasks.loop(hours=1)
+    @tasks.loop(minutes=1)
     async def update_activity(self) -> None:
         """Update bot activity with PnL information every hour"""
         try:
@@ -47,13 +49,14 @@ class ActivityUpdaterCog(commands.Cog):
             pnl_pct_str = f"{total_pnl_percent:+.2f}"
             activity_text = (
                 f"PnL : {pnl_str} USDT ({pnl_pct_str}%) | "
+                f"Update : {datetime.now().strftime('%H:%M')} | "
                 f"Version : {self.bot.version}"  # type: ignore
             )
 
             activity = discord.CustomActivity(name=activity_text)
             await self.bot.change_presence(activity=activity)
 
-            logger.info(f"Activity updated: {activity_text}")
+            logger.debug(f"Activity updated: {activity_text}")
         except Exception as e:
             logger.error(f"Error updating bot activity: {e}")
 
