@@ -5,7 +5,7 @@ services:
       dockerfile: Dockerfile
     volumes:
       - ./src/crypto_spot_collector/apps/secrets.json:/app/crypto_spot_collector/apps/secrets.json:ro
-      - ./logs:/app/crypto_spot_collector/scripts/logs
+      - ./logs:/app/crypto_spot_collector/apps/logs
     # command: sleep infinity
     command: uv run crypto_spot_collector/apps/buy_spot.py
     depends_on:
@@ -21,7 +21,7 @@ services:
       dockerfile: Dockerfile
     volumes:
       - ./src/crypto_spot_collector/apps/secrets.json:/app/crypto_spot_collector/apps/secrets.json:ro
-      - ./logs:/app/crypto_spot_collector/scripts/logs
+      - ./logs:/app/crypto_spot_collector/apps/logs
     # command: sleep infinity
     command: uv run crypto_spot_collector/apps/discord_appliation.py
     depends_on:
