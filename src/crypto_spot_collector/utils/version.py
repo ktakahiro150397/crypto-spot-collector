@@ -19,8 +19,8 @@ def get_version_from_git() -> str:
     try:
         # Get repository root directory (go up from this file to repo root)
         # version.py -> utils -> crypto_spot_collector -> src -> repo_root
-        repo_path = Path(__file__).parent.parent.parent.parent
-        repo = Repo(repo_path)
+        repo_path = Path(__file__)
+        repo = Repo(repo_path, search_parent_directories=True)
         
         # Get current branch name
         branch_name = repo.active_branch.name

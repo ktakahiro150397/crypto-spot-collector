@@ -13,8 +13,14 @@ ENV PATH="/bin/:$PATH"
 # Make uv available to all users
 RUN ln -s /root/.cargo/bin/uv /usr/local/bin/uv
 
+# Install git
+RUN apt-get update && apt-get install -y git && rm -rf /var/lib/apt/lists/*
+
 # Set up app directory
 WORKDIR /app
+
+# Copy git directory for version information
+COPY .git /app/.git
 
 # Copy application files
 COPY /src /app
