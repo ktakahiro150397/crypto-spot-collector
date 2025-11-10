@@ -70,8 +70,12 @@ class ActivityUpdaterCog(commands.Cog):
                 description_text += f"Free USDT : ${free_usdt:.2f}\n\n"
                 for asset in portfolio:
                     if asset.symbol != "USDT":
+                        # Calculate PnL percentage relative to purchase price
+                        pnl_percent = (
+                            asset.profit_loss / (asset.current_value - asset.profit_loss)
+                        ) * 100 if (asset.current_value - asset.profit_loss) != 0 else 0
                         description_text += (
-                            f"{asset.symbol:<4} : {asset.profit_loss:>+6.2f}%\n"
+                            f"{asset.symbol:<4} : {pnl_percent:>+6.2f}%\n"
                         )
 
                 await self.bot.application.edit(description=description_text)
