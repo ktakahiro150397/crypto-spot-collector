@@ -9,11 +9,12 @@ import seaborn as sns
 from loguru import logger
 from matplotlib import font_manager
 from matplotlib import pyplot as plt
-from ta.trend import PSARIndicator
 
 from crypto_spot_collector.apps.import_historical_data import HistoricalDataImporter
+from crypto_spot_collector.checkers.sar_checker import SARChecker
 from crypto_spot_collector.exchange.bybit import BybitExchange
 from crypto_spot_collector.notification.discord import discordNotification
+from crypto_spot_collector.providers.market_data_provider import MarketDataProvider
 from crypto_spot_collector.repository.ohlcv_repository import OHLCVRepository
 from crypto_spot_collector.utils.secrets import load_config
 
@@ -208,99 +209,78 @@ async def check_signal(
 
     logger.debug(f"Checking signal for {symbol} from {startDate} to {endDate}")
 
-    with OHLCVRepository() as repo:
-        data = repo.get_ohlcv_data(
+    # Use MarketDataProvider to get DataFrame with indicators
+    data_provider = MarketDataProvider()
+    df = data_provider.get_dataframe_with_indicators(
+        symbol=symbol,
+        interval=timeframe,
+        from_datetime=startDate,
+        to_datetime=endDate,
+        sma_windows=[50, 100],
+        sar_config={"step": 0.02, "max_step": 0.2}
+    )
+
+    logger.debug(f"Retrieved {len(df)} OHLCV records for {symbol}")
+
+    if df.empty:
+        logger.warning(f"No data available for {symbol}")
+        return
+
+    # Use SARChecker to check for buy signal
+    sar_checker = SARChecker(consecutive_positive_count=consecutivePositiveCount)
+    sar_up_signal = sar_checker.check(df)
+    logger.info(f"{symbol}: SAR Up Signal: {sar_up_signal}")
+
+    # デバッグ用：実際の値を表示
+    logger.debug(f"{symbol}: Recent SAR Up values (newest first):")
+    if sar_up_signal:
+        logger.info(f"{symbol}: SAR buy signal detected! Placing order...")
+        order_result = None
+        try:
+            _, order_result = bybit_exchange.create_order_spot(
+                amountByUSDT=amountByUSDT, symbol=symbol
+            )
+            logger.success(f"Successfully created spot order for {symbol}")
+        except Exception as e:
+            logger.error(f"Error creating spot order for {symbol}: {e}")
+            await notificator.send_notification_async(
+                message=f"Error creating spot order for {symbol}: {e}",
+                files=[]
+            )
+            return
+
+        # Discord通知
+        free_usdt = bybit_exchange.fetch_free_usdt()
+        average_price = bybit_exchange.fetch_average_buy_price_spot(symbol)
+        embed = discordNotification.embed_object_create_helper(
             symbol=symbol,
-            interval=timeframe,
-            from_datetime=startDate,
-            to_datetime=endDate,
+            price=order_result.price,
+            amount=order_result.amount,
+            freeUsdt=free_usdt,
+            order_value=order_result.order_value,
+            order_id=order_result.order_id,
+            footer="buy_spot.py | bybit",
+            timeframe=timeframe
         )
 
-        logger.debug(f"Retrieved {len(data)} OHLCV records for {symbol}")
-
-        # データをDataFrameに変換
-        df = pd.DataFrame(
-            [
-                {
-                    "timestamp": d.timestamp_utc,  # JSTに変換
-                    "open": float(d.open_price),
-                    "high": float(d.high_price),
-                    "low": float(d.low_price),
-                    "close": float(d.close_price),
-                    "volume": float(d.volume),
-                }
-                for d in data
-            ]
+        # グラフ作成
+        plot_buf = [(notification_plot_buff(
+            df=df,
+            timeframe=timeframe,
+            symbol=symbol,
+            average_price=average_price,
+            limit_price=order_result.price), f"{symbol}_sar.png")]
+        await notificator.send_notification_embed_with_file(
+            message="",
+            embeds=[embed],
+            image_buffers=plot_buf
         )
-        # SMA50の計算
-        df["sma_50"] = df['close'].rolling(window=50).mean()
-        # SMA100の計算
-        df["sma_100"] = df['close'].rolling(window=100).mean()
+        logger.info(f"Sent Discord notification for {symbol}")
 
-        # SAR計算（初期AF=0.02, 最大AF=0.2）
-        sar_indicator = PSARIndicator(
-            high=df["high"], low=df["low"], close=df["close"], step=0.02, max_step=0.2
-        )
-
-        df["sar"] = sar_indicator.psar()
-        df["sar_up"] = sar_indicator.psar_up()
-        df["sar_down"] = sar_indicator.psar_down()
-
-        # SAR上昇シグナルをチェック
-        sar_up_signal = check_sar_signal(
-            df["sar_up"], consecutivePositiveCount)
-        logger.info(f"{symbol}: SAR Up Signal: {sar_up_signal}")
-
-        # デバッグ用：実際の値を表示
-        logger.debug(f"{symbol}: Recent SAR Up values (newest first):")
-        if sar_up_signal:
-            logger.info(f"{symbol}: SAR buy signal detected! Placing order...")
-            order_result = None
-            try:
-                _, order_result = bybit_exchange.create_order_spot(
-                    amountByUSDT=amountByUSDT, symbol=symbol
-                )
-                logger.success(f"Successfully created spot order for {symbol}")
-            except Exception as e:
-                logger.error(f"Error creating spot order for {symbol}: {e}")
-                await notificator.send_notification_async(
-                    message=f"Error creating spot order for {symbol}: {e}",
-                    files=[]
-                )
-                return
-
-            # Discord通知
-            free_usdt = bybit_exchange.fetch_free_usdt()
-            average_price = bybit_exchange.fetch_average_buy_price_spot(symbol)
-            embed = discordNotification.embed_object_create_helper(
-                symbol=symbol,
-                price=order_result.price,
-                amount=order_result.amount,
-                freeUsdt=free_usdt,
-                order_value=order_result.order_value,
-                order_id=order_result.order_id,
-                footer="buy_spot.py | bybit",
-                timeframe=timeframe
-            )
-
-            # グラフ作成
-            plot_buf = [(notification_plot_buff(
-                df=df,
-                timeframe=timeframe,
-                symbol=symbol,
-                average_price=average_price,
-                limit_price=order_result.price), f"{symbol}_sar.png")]
-            await notificator.send_notification_embed_with_file(
-                message="",
-                embeds=[embed],
-                image_buffers=plot_buf
-            )
-            logger.info(f"Sent Discord notification for {symbol}")
-
-            for i, sar_up in enumerate(df["sar_up"].tail(10)[::-1]):
-                logger.debug(f"  {i}: {sar_up}")
-        else:
-            logger.debug(f"{symbol}: No SAR Up signal detected.")
+        for i, sar_up in enumerate(df["sar_up"].tail(10)[::-1]):
+            logger.debug(f"  {i}: {sar_up}")
+    else:
+        logger.debug(f"{symbol}: No SAR Up signal detected.")
 
 
 async def notify_current_portfolio() -> None:
@@ -310,43 +290,6 @@ async def notify_current_portfolio() -> None:
         await notificator.send_notification_with_image_async(
             "現時点の成績です！", plot_buf
         )
-
-
-def check_sar_signal(sar_series: pd.Series, consecutivePositiveCount: int) -> bool:
-    """
-    NaNから数値に切り替わって、そこから3つ連続で正の値になっている場合のみTrueを返す
-    それ以上のプラス連続はFalseを返す
-    """
-    # 最新10件を逆順で取得(最新 -> 古い順)
-    recent_values = sar_series.tail(10)[::-1].values
-
-    consecutive_positive = 0
-
-    # 最初に連続する数値の個数を数える
-    for i, value in enumerate(recent_values):
-        if pd.isna(value):
-            break
-        consecutive_positive += 1
-
-    logger.debug(f"Consecutive positive SAR values: {consecutive_positive}")
-
-    # 連続する数値が3つ以外の場合はFalse
-    if consecutive_positive != consecutivePositiveCount:
-        logger.debug(
-            f"Signal check failed: consecutive_positive={consecutive_positive} (expected: {consecutivePositiveCount})")
-        return False
-
-    # 3つの数値の後にNaNがあるかチェック
-    if consecutive_positive < len(recent_values) and pd.isna(
-        recent_values[consecutive_positive]
-    ):
-        logger.debug(
-            f"SAR signal confirmed: {consecutivePositiveCount} consecutive positive values after NaN")
-        return True
-
-    logger.debug(
-        f"Signal check failed: no NaN after {consecutivePositiveCount} consecutive positive values")
-    return False
 
 
 def notification_plot_buff(df: pd.DataFrame, timeframe: str, symbol: str, average_price: float, limit_price: float) -> BytesIO:
