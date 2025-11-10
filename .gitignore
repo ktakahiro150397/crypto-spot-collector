@@ -179,7 +179,6 @@ logs/
 .env.local
 .env.*.local
 secrets.json
-config/secrets.json
 
 # Node modules (if using Node.js tools)
 node_modules/

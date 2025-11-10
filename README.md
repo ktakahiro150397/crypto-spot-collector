@@ -108,14 +108,39 @@ crypto-spot-collector/
 ├── .devcontainer/          # Dev Container設定
 ├── src/
 │   └── crypto_spot_collector/  # メインパッケージ
+│       ├── apps/           # アプリケーションスクリプト
+│       │   ├── buy_spot.py
+│       │   ├── discord_appliation.py
+│       │   ├── secrets.json.sample  # APIキー設定サンプル
+│       │   ├── settings.json.sample # 公開設定サンプル
+│       │   └── CONFIG.md   # 設定ファイルのドキュメント
+│       ├── scripts/        # スクリプト
+│       └── utils/          # ユーティリティ
 ├── tests/                  # テストファイル
 ├── docs/                   # ドキュメント
-├── config/                 # 設定ファイル
 ├── pyproject.toml          # プロジェクト設定
 ├── .gitignore              # Git無視ファイル
 ├── .gitattributes          # Git属性設定
 └── .pre-commit-config.yaml # Pre-commit設定
 ```
+
+## 設定ファイル
+
+アプリケーションを実行する前に、設定ファイルを準備する必要があります。
+
+### セットアップ手順
+
+1. サンプルファイルをコピー:
+```bash
+cd src/crypto_spot_collector/apps
+cp secrets.json.sample secrets.json
+cp settings.json.sample settings.json
+```
+
+2. `secrets.json` に実際のAPIキーを設定
+3. `settings.json` に取引設定やDiscord設定を記入
+
+詳細は `src/crypto_spot_collector/apps/CONFIG.md` を参照してください。
 
 ## ライセンス
 

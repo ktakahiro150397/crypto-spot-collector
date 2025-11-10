@@ -1,0 +1,16 @@
+{
+    "settings": {
+        "timeframes": [
+            {
+                "timeframe": "4h",
+                "amountBuyUSDT": 10.0,
+                "consecutivePositiveCount": 3
+            },
+            {
+                "timeframe": "1d",
+                "amountBuyUSDT": 20.0,
+                "consecutivePositiveCount": 3
+            }
+        ]
+    }
+}

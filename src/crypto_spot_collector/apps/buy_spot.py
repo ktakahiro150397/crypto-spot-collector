@@ -15,7 +15,7 @@ from crypto_spot_collector.apps.import_historical_data import HistoricalDataImpo
 from crypto_spot_collector.exchange.bybit import BybitExchange
 from crypto_spot_collector.notification.discord import discordNotification
 from crypto_spot_collector.repository.ohlcv_repository import OHLCVRepository
-from crypto_spot_collector.utils.secrets import load_secrets
+from crypto_spot_collector.utils.secrets import load_config
 
 # ログ設定
 # ログフォルダのパスを取得（プロジェクトルート/logs）
@@ -95,9 +95,10 @@ spot_symbol = ["btc", "eth", "xrp", "sol", "link",
 
 logger.info("Initializing crypto spot collector script")
 secret_file = Path(__file__).parent / "secrets.json"
-secrets = load_secrets(secret_file)
+settings_file = Path(__file__).parent / "settings.json"
+secrets = load_config(secret_file, settings_file)
 
-notificator = discordNotification(secrets["settings"]["discordWebhookUrl"])
+notificator = discordNotification(secrets["discord"]["discordWebhookUrl"])
 importer = HistoricalDataImporter()
 logger.info("Discord notification and historical data importer initialized")
 
@@ -113,7 +114,7 @@ async def main() -> None:
 
     logger.info("---- Settings ----")
     logger.info(
-        f"Discord Webhook URL: {secrets['settings']['discordWebhookUrl']}")
+        f"Discord Webhook URL: {secrets['discord']['discordWebhookUrl']}")
     logger.info(f"Spot Symbols: {spot_symbol}")
     for setting in secrets["settings"]["timeframes"]:
         logger.info("------------------")
