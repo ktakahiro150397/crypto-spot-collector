@@ -60,7 +60,7 @@ secret_file = Path(__file__).parent / "secrets.json"
 settings_file = Path(__file__).parent / "settings.json"
 secrets = load_config(secret_file, settings_file)
 
-BOT_TOKEN = secrets["settings"]["discordBotToken"]
+BOT_TOKEN = secrets["discord"]["discordBotToken"]
 
 
 @bot.event

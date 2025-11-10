@@ -1,40 +1,17 @@
-from datetime import datetime, timedelta, timezone
-from typing import Any
-
-import matplotlib.dates as mdates
 import pandas as pd
-import seaborn as sns
-from matplotlib import font_manager
 from matplotlib import pyplot as plt
-from PIL import Image
-from ta.trend import PSARIndicator
 
 from crypto_spot_collector.exchange.bybit import BybitExchange
-from crypto_spot_collector.scripts.import_historical_data import HistoricalDataImporter
-
-
-def load_secrets() -> Any:
-    import json
-    from pathlib import Path
-
-    secrets_path = Path(__file__).parent / "secrets.json"
-    settings_path = Path(__file__).parent / "settings.json"
-    
-    with open(secrets_path, "r") as f:
-        secrets = json.load(f)
-    
-    with open(settings_path, "r") as f:
-        settings = json.load(f)
-    
-    # Merge settings into secrets for backward compatibility
-    config = secrets.copy()
-    config.update(settings)
-    
-    return config
+from crypto_spot_collector.utils.secrets import load_config
 
 
 async def main() -> None:
-    secrets = load_secrets()
+    from pathlib import Path
+    
+    # Use the secrets.json and settings.json from the apps directory
+    secrets_path = Path(__file__).parent.parent / "apps" / "secrets.json"
+    settings_path = Path(__file__).parent.parent / "apps" / "settings.json"
+    secrets = load_config(secrets_path, settings_path)
 
     bybit_exchange = BybitExchange(
         apiKey=secrets["bybit"]["apiKey"],

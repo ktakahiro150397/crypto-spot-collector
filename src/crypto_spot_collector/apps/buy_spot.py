@@ -98,7 +98,7 @@ secret_file = Path(__file__).parent / "secrets.json"
 settings_file = Path(__file__).parent / "settings.json"
 secrets = load_config(secret_file, settings_file)
 
-notificator = discordNotification(secrets["settings"]["discordWebhookUrl"])
+notificator = discordNotification(secrets["discord"]["discordWebhookUrl"])
 importer = HistoricalDataImporter()
 logger.info("Discord notification and historical data importer initialized")
 
@@ -114,7 +114,7 @@ async def main() -> None:
 
     logger.info("---- Settings ----")
     logger.info(
-        f"Discord Webhook URL: {secrets['settings']['discordWebhookUrl']}")
+        f"Discord Webhook URL: {secrets['discord']['discordWebhookUrl']}")
     logger.info(f"Spot Symbols: {spot_symbol}")
     for setting in secrets["settings"]["timeframes"]:
         logger.info("------------------")

@@ -3,14 +3,17 @@ from pathlib import Path
 
 from crypto_spot_collector.exchange.bybit import SpotOrderResult
 from crypto_spot_collector.notification.discord import discordNotification
-
-webhook_url: str = "https://discord.com/api/webhooks/1126667309612793907/uEnoqjxaAk7ZHdNDFVnJaVtfpwSalKf2FEZrB_T1XX4T7HAKMkueISJjb5tztJ3eb1pp"
+from crypto_spot_collector.utils.secrets import load_config
 
 
 async def main() -> None:
+    # Load configuration from JSON files
+    secrets_path = Path(__file__).parent.parent / "apps" / "secrets.json"
+    settings_path = Path(__file__).parent.parent / "apps" / "settings.json"
+    secrets = load_config(secrets_path, settings_path)
 
     notificator: discordNotification = discordNotification(
-        webhook_url=webhook_url)
+        webhook_url=secrets["discord"]["discordWebhookUrl"])
 
     test_file_path: str = str(
         Path(__file__).resolve().parent / "test_notification.png")
