@@ -18,9 +18,19 @@ def load_secrets() -> Any:
     from pathlib import Path
 
     secrets_path = Path(__file__).parent / "secrets.json"
+    settings_path = Path(__file__).parent / "settings.json"
+    
     with open(secrets_path, "r") as f:
         secrets = json.load(f)
-    return secrets
+    
+    with open(settings_path, "r") as f:
+        settings = json.load(f)
+    
+    # Merge settings into secrets for backward compatibility
+    config = secrets.copy()
+    config.update(settings)
+    
+    return config
 
 
 async def main() -> None:

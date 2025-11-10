@@ -180,6 +180,8 @@ logs/
 .env.*.local
 secrets.json
 config/secrets.json
+settings.json
+config/settings.json
 
 # Node modules (if using Node.js tools)
 node_modules/

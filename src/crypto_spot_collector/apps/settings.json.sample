@@ -1,0 +1,18 @@
+{
+  "settings": {
+    "discordWebhookUrl": "https://discord.com/api/webhooks/YOUR_WEBHOOK_ID/YOUR_WEBHOOK_TOKEN",
+    "discordBotToken": "YOUR_DISCORD_BOT_TOKEN",
+    "timeframes": [
+      {
+        "timeframe": "4h",
+        "amountBuyUSDT": 10.0,
+        "consecutivePositiveCount": 3
+      },
+      {
+        "timeframe": "1d",
+        "amountBuyUSDT": 20.0,
+        "consecutivePositiveCount": 3
+      }
+    ]
+  }
+}

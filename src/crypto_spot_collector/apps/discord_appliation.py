@@ -10,7 +10,7 @@ from loguru import logger
 from crypto_spot_collector.exchange.bybit import BybitExchange
 
 # from crypto_spot_collector.discord.cogs.greet import GreetCog
-from crypto_spot_collector.utils.secrets import load_secrets
+from crypto_spot_collector.utils.secrets import load_config
 from crypto_spot_collector.utils.version import get_version_from_git
 
 intents = discord.Intents.default()
@@ -57,7 +57,8 @@ log_file = LOG_DIR / \
     f"discord_application_{datetime.now().strftime('%Y%m%d')}.log"
 
 secret_file = Path(__file__).parent / "secrets.json"
-secrets = load_secrets(secret_file)
+settings_file = Path(__file__).parent / "settings.json"
+secrets = load_config(secret_file, settings_file)
 
 BOT_TOKEN = secrets["settings"]["discordBotToken"]
 
