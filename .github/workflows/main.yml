@@ -16,7 +16,10 @@ jobs:
           host: ${{ secrets.SSH_HOST }}
           username: ${{ secrets.SSH_USERNAME }}
           port: ${{ secrets.SSH_PORT }}
-          passphrase: ${{ secrets.SSH_PASSPHRASE }}
+          timeout: 60s
+          command_timeout: 30m
+          debug: true
+          sync: true
           script: |
             cd /home/ktakahiro150397/repo/crypto-spot-collector/
             git pull
