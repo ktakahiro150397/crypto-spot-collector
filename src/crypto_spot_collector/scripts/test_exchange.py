@@ -7,7 +7,7 @@ from crypto_spot_collector.utils.secrets import load_config
 
 async def main() -> None:
     from pathlib import Path
-    
+
     # Use the secrets.json and settings.json from the apps directory
     secrets_path = Path(__file__).parent.parent / "apps" / "secrets.json"
     settings_path = Path(__file__).parent.parent / "apps" / "settings.json"
