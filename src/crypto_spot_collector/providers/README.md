@@ -1,84 +1,84 @@
-# Market Data Provider
+# マーケットデータプロバイダー
 
-This module provides a unified interface for retrieving market data with technical indicators.
+このモジュールは、テクニカルインジケーター付きのマーケットデータを取得するための統一されたインターフェースを提供します。
 
-## Overview
+## 概要
 
-The `MarketDataProvider` class encapsulates the logic for fetching OHLCV (Open, High, Low, Close, Volume) data from the database and enriching it with commonly used technical indicators like SMA (Simple Moving Average) and SAR (Parabolic SAR).
+`MarketDataProvider` クラスは、データベースからOHLCV（Open, High, Low, Close, Volume）データを取得し、SMA（単純移動平均）やSAR（パラボリックSAR）などの一般的に使用されるテクニカルインジケーターで強化するロジックをカプセル化します。
 
-## Usage
+## 使い方
 
 ```python
 from datetime import datetime, timedelta
 from crypto_spot_collector.providers.market_data_provider import MarketDataProvider
 
-# Initialize the provider
+# プロバイダーを初期化
 provider = MarketDataProvider()
 
-# Get data with indicators
+# インジケーター付きのデータを取得
 df = provider.get_dataframe_with_indicators(
     symbol="BTC",
     interval="1h",
     from_datetime=datetime.now() - timedelta(days=14),
     to_datetime=datetime.now(),
-    sma_windows=[50, 100],  # Optional, defaults to [50, 100]
-    sar_config={"step": 0.02, "max_step": 0.2}  # Optional
+    sma_windows=[50, 100],  # オプション、デフォルトは [50, 100]
+    sar_config={"step": 0.02, "max_step": 0.2}  # オプション
 )
 ```
 
-## DataFrame Columns
+## DataFrameのカラム
 
-The returned DataFrame contains the following columns:
+返されるDataFrameには以下のカラムが含まれます：
 
-- `timestamp`: Timestamp in UTC
-- `open`: Opening price
-- `high`: Highest price
-- `low`: Lowest price
-- `close`: Closing price
-- `volume`: Trading volume
-- `sma_{window}`: Simple Moving Average for each window size (e.g., `sma_50`, `sma_100`)
-- `sar`: Parabolic SAR value
-- `sar_up`: SAR value during bullish trend (NaN during bearish)
-- `sar_down`: SAR value during bearish trend (NaN during bullish)
+- `timestamp`: UTC タイムスタンプ
+- `open`: 始値
+- `high`: 高値
+- `low`: 安値
+- `close`: 終値
+- `volume`: 取引量
+- `sma_{window}`: 各ウィンドウサイズの単純移動平均（例: `sma_50`, `sma_100`）
+- `sar`: パラボリックSAR値
+- `sar_up`: 強気トレンド中のSAR値（弱気時はNaN）
+- `sar_down`: 弱気トレンド中のSAR値（強気時はNaN）
 
-## Parameters
+## パラメータ
 
 ### get_dataframe_with_indicators
 
-- `symbol` (str): Cryptocurrency symbol (e.g., 'BTC', 'ETH')
-- `interval` (Literal): Time interval - one of "1m", "5m", "10m", "1h", "2h", "4h", "6h"
-- `from_datetime` (datetime): Start datetime (inclusive)
-- `to_datetime` (datetime): End datetime (inclusive)
-- `sma_windows` (Optional[List[int]]): List of SMA window sizes to calculate (default: [50, 100])
-- `sar_config` (Optional[Dict[str, float]]): SAR configuration with 'step' and 'max_step' keys (default: {"step": 0.02, "max_step": 0.2})
+- `symbol` (str): 仮想通貨シンボル（例: 'BTC', 'ETH'）
+- `interval` (Literal): 時間間隔 - "1m", "5m", "10m", "1h", "2h", "4h", "6h" のいずれか
+- `from_datetime` (datetime): 開始日時（この日時を含む）
+- `to_datetime` (datetime): 終了日時（この日時を含む）
+- `sma_windows` (Optional[List[int]]): 計算するSMAウィンドウサイズのリスト（デフォルト: [50, 100]）
+- `sar_config` (Optional[Dict[str, float]]): 'step' と 'max_step' キーを持つSAR設定（デフォルト: {"step": 0.02, "max_step": 0.2}）
 
-## Example: Custom Indicators
+## 例: カスタムインジケーター
 
-To use different SMA windows or SAR configuration:
+異なるSMAウィンドウやSAR設定を使用する場合：
 
 ```python
-# Custom SMA windows
+# カスタムSMAウィンドウ
 df = provider.get_dataframe_with_indicators(
     symbol="ETH",
     interval="4h",
     from_datetime=start,
     to_datetime=end,
-    sma_windows=[20, 50, 200]  # 20, 50, and 200-period SMAs
+    sma_windows=[20, 50, 200]  # 20、50、200期間のSMA
 )
 
-# Custom SAR parameters
+# カスタムSARパラメータ
 df = provider.get_dataframe_with_indicators(
     symbol="SOL",
     interval="1h",
     from_datetime=start,
     to_datetime=end,
-    sar_config={"step": 0.01, "max_step": 0.15}  # Less aggressive SAR
+    sar_config={"step": 0.01, "max_step": 0.15}  # より緩やかなSAR
 )
 ```
 
-## Benefits
+## メリット
 
-1. **Consistency**: Ensures all trading strategies use the same data processing logic
-2. **Maintainability**: Changes to indicator calculations only need to be made in one place
-3. **Extensibility**: Easy to add new indicators without modifying trading logic
-4. **Testability**: Data retrieval and processing can be tested independently
+1. **一貫性**: すべての取引戦略が同じデータ処理ロジックを使用することを保証
+2. **保守性**: インジケーター計算の変更は一箇所で行うだけで済む
+3. **拡張性**: 取引ロジックを変更せずに新しいインジケーターを簡単に追加できる
+4. **テスト可能性**: データ取得と処理を独立してテストできる

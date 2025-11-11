@@ -1,14 +1,14 @@
-# Trading Signal Checkers
+# トレーディングシグナルチェッカー
 
-This module contains checker classes for detecting trading signals in market data.
+このモジュールは、市場データから取引シグナルを検出するためのチェッカークラスを含んでいます。
 
-## Overview
+## 概要
 
-The checker system is designed to be extensible, allowing for multiple trading strategies to be implemented without modifying the core trading logic.
+チェッカーシステムは拡張可能に設計されており、コアの取引ロジックを変更することなく、複数の取引戦略を実装できます。
 
-## Base Class
+## 基底クラス
 
-All checkers inherit from `SignalChecker` base class which provides a common interface:
+すべてのチェッカーは `SignalChecker` 基底クラスを継承し、共通のインターフェースを提供します：
 
 ```python
 from crypto_spot_collector.checkers.base_checker import SignalChecker
@@ -16,39 +16,39 @@ from crypto_spot_collector.checkers.base_checker import SignalChecker
 class SignalChecker(ABC):
     @abstractmethod
     def check(self, df: pd.DataFrame, **kwargs) -> bool:
-        """Check for trading signals in the provided DataFrame."""
+        """提供されたDataFrame内の取引シグナルをチェックします。"""
         pass
 ```
 
-## Available Checkers
+## 利用可能なチェッカー
 
 ### SARChecker
 
-The `SARChecker` detects buy signals based on the Parabolic SAR indicator.
+`SARChecker` はパラボリックSARインジケーターに基づいて買いシグナルを検出します。
 
-**Usage:**
+**使い方:**
 
 ```python
 from crypto_spot_collector.checkers.sar_checker import SARChecker
 
-# Initialize checker with desired consecutive count
+# 希望する連続カウントでチェッカーを初期化
 checker = SARChecker(consecutive_positive_count=3)
 
-# Check for signal in DataFrame with SAR indicators
+# SARインジケーターを含むDataFrameでシグナルをチェック
 signal_detected = checker.check(df)
 ```
 
-**Signal Logic:**
+**シグナルロジック:**
 
-The checker looks for exactly N consecutive positive SAR values that appear after NaN values, where N is the `consecutive_positive_count`. This indicates a potential bullish trend reversal.
+このチェッカーは、NaN値の後に現れる正確にN個の連続した正のSAR値を探します。ここでNは `consecutive_positive_count` です。これは潜在的な強気トレンド転換を示します。
 
-**Parameters:**
+**パラメータ:**
 
-- `consecutive_positive_count` (int): Number of consecutive positive SAR values required for a buy signal (default: 3)
+- `consecutive_positive_count` (int): 買いシグナルに必要な連続した正のSAR値の数（デフォルト: 3）
 
-## Creating a New Checker
+## 新しいチェッカーの作成
 
-To create a new trading strategy, inherit from `SignalChecker`:
+新しい取引戦略を作成するには、`SignalChecker` を継承します：
 
 ```python
 from crypto_spot_collector.checkers.base_checker import SignalChecker
@@ -59,16 +59,16 @@ class MyCustomChecker(SignalChecker):
         self.custom_param = custom_param
     
     def check(self, df: pd.DataFrame, **kwargs) -> bool:
-        # Implement your signal detection logic here
-        # Return True if buy signal is detected, False otherwise
+        # ここにシグナル検出ロジックを実装
+        # 買いシグナルが検出された場合はTrue、それ以外はFalseを返す
         return False
 ```
 
-Then use it in your trading logic:
+取引ロジックで使用する：
 
 ```python
 checker = MyCustomChecker(custom_param=20)
 if checker.check(df):
-    # Place order
+    # 注文を実行
     pass
 ```

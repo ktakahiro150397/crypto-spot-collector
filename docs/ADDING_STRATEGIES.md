@@ -1,15 +1,15 @@
-# Example: Adding a New Trading Strategy
+# 例: 新しい取引戦略の追加
 
-This example demonstrates how to add a new trading strategy using the refactored architecture.
+この例では、リファクタリングされたアーキテクチャを使用して新しい取引戦略を追加する方法を示します。
 
-## Step 1: Create a New Checker
+## ステップ1: 新しいチェッカーを作成
 
-Create a new checker class that inherits from `SignalChecker`:
+`SignalChecker` を継承する新しいチェッカークラスを作成します：
 
 ```python
-# File: src/crypto_spot_collector/checkers/crossover_checker.py
+# ファイル: src/crypto_spot_collector/checkers/crossover_checker.py
 
-"""Moving Average Crossover signal checker implementation."""
+"""移動平均クロスオーバーシグナルチェッカーの実装。"""
 
 import pandas as pd
 from loguru import logger
@@ -18,31 +18,31 @@ from crypto_spot_collector.checkers.base_checker import SignalChecker
 
 
 class MovingAverageCrossoverChecker(SignalChecker):
-    """Checker for Moving Average crossover buy signals."""
+    """移動平均クロスオーバー買いシグナル用のチェッカー。"""
 
     def __init__(self, fast_period: int = 50, slow_period: int = 100) -> None:
         """
-        Initialize MA Crossover checker.
+        MAクロスオーバーチェッカーを初期化します。
 
         Args:
-            fast_period: Period for fast moving average
-            slow_period: Period for slow moving average
+            fast_period: 高速移動平均の期間
+            slow_period: 低速移動平均の期間
         """
         self.fast_period = fast_period
         self.slow_period = slow_period
 
     def check(self, df: pd.DataFrame, **kwargs) -> bool:
         """
-        Check for MA crossover buy signal.
+        MAクロスオーバー買いシグナルをチェックします。
 
-        Signal is detected when fast MA crosses above slow MA.
+        高速MAが低速MAを上抜けした時にシグナルが検出されます。
 
         Args:
-            df: DataFrame with OHLCV data and SMA indicators
-            **kwargs: Additional parameters (not used)
+            df: OHLCVデータとSMAインジケーターを含むDataFrame
+            **kwargs: 追加パラメータ（未使用）
 
         Returns:
-            True if crossover buy signal is detected, False otherwise
+            クロスオーバー買いシグナルが検出された場合はTrue、それ以外はFalse
         """
         fast_col = f"sma_{self.fast_period}"
         slow_col = f"sma_{self.slow_period}"
@@ -54,13 +54,13 @@ class MovingAverageCrossoverChecker(SignalChecker):
         if len(df) < 2:
             return False
 
-        # Check if fast MA crossed above slow MA in the most recent period
+        # 直近の期間で高速MAが低速MAを上抜けしたかチェック
         current_fast = df[fast_col].iloc[-1]
         current_slow = df[slow_col].iloc[-1]
         previous_fast = df[fast_col].iloc[-2]
         previous_slow = df[slow_col].iloc[-2]
 
-        # Crossover: fast was below slow, now fast is above slow
+        # クロスオーバー: 高速が低速以下だったが、今は高速が低速より上
         if pd.notna(current_fast) and pd.notna(current_slow):
             if previous_fast <= previous_slow and current_fast > current_slow:
                 logger.info("MA Crossover signal: Fast MA crossed above Slow MA")
@@ -69,12 +69,12 @@ class MovingAverageCrossoverChecker(SignalChecker):
         return False
 ```
 
-## Step 2: Use the New Checker in buy_spot.py
+## ステップ2: buy_spot.pyで新しいチェッカーを使用
 
-Modify the `check_signal` function to use your new checker:
+`check_signal` 関数を修正して新しいチェッカーを使用します：
 
 ```python
-# In buy_spot.py, you can now easily switch strategies:
+# buy_spot.py内で、簡単に戦略を切り替えることができます：
 
 from crypto_spot_collector.checkers.sar_checker import SARChecker
 from crypto_spot_collector.checkers.crossover_checker import MovingAverageCrossoverChecker
@@ -85,11 +85,11 @@ async def check_signal(
     symbol: str,
     timeframe: str,
     amountByUSDT: float,
-    strategy: str = "sar"  # Add strategy parameter
+    strategy: str = "sar"  # 戦略パラメータを追加
 ) -> None:
-    """Check for buy signals using specified strategy."""
+    """指定された戦略を使用して買いシグナルをチェックします。"""
 
-    # Get data with indicators
+    # インジケーター付きのデータを取得
     data_provider = MarketDataProvider()
     df = data_provider.get_dataframe_with_indicators(
         symbol=symbol,
@@ -100,7 +100,7 @@ async def check_signal(
         sar_config={"step": 0.02, "max_step": 0.2}
     )
 
-    # Select checker based on strategy
+    # 戦略に基づいてチェッカーを選択
     if strategy == "sar":
         checker = SARChecker(consecutive_positive_count=3)
     elif strategy == "ma_crossover":
@@ -109,17 +109,17 @@ async def check_signal(
         logger.error(f"Unknown strategy: {strategy}")
         return
 
-    # Check for signal using the selected strategy
+    # 選択した戦略を使用してシグナルをチェック
     signal_detected = checker.check(df)
     
     if signal_detected:
-        # Place order...
+        # 注文を実行...
         pass
 ```
 
-## Step 3: Configure Strategy in Settings
+## ステップ3: 設定で戦略を構成
 
-Add strategy configuration to your `secrets.json`:
+`secrets.json` に戦略設定を追加します：
 
 ```json
 {
@@ -141,28 +141,28 @@ Add strategy configuration to your `secrets.json`:
 }
 ```
 
-## Benefits of This Architecture
+## このアーキテクチャのメリット
 
-1. **Separation of Concerns**: Trading logic is separated from signal detection
-2. **Easy Testing**: Each checker can be tested independently
-3. **Multiple Strategies**: Run different strategies on different timeframes
-4. **No Code Duplication**: Data fetching logic is centralized
-5. **Maintainability**: Changes to one strategy don't affect others
+1. **関心の分離**: 取引ロジックとシグナル検出が分離されている
+2. **テストが容易**: 各チェッカーを独立してテストできる
+3. **複数の戦略**: 異なるタイムフレームで異なる戦略を実行できる
+4. **コードの重複なし**: データ取得ロジックが一元化されている
+5. **保守性**: ある戦略への変更が他の戦略に影響しない
 
-## Adding More Indicators
+## インジケーターの追加
 
-To add more indicators to the DataFrame, modify `MarketDataProvider`:
+DataFrameにさらにインジケーターを追加するには、`MarketDataProvider` を修正します：
 
 ```python
-# In market_data_provider.py
+# market_data_provider.py 内で
 
 def get_dataframe_with_indicators(
     self,
     ...
-    rsi_period: int = 14,  # Add new parameter
+    rsi_period: int = 14,  # 新しいパラメータを追加
 ) -> pd.DataFrame:
     ...
-    # Add RSI indicator
+    # RSIインジケーターを追加
     from ta.momentum import RSIIndicator
     rsi = RSIIndicator(close=df["close"], window=rsi_period)
     df["rsi"] = rsi.rsi()
@@ -170,7 +170,7 @@ def get_dataframe_with_indicators(
     return df
 ```
 
-Then use it in your checker:
+チェッカーで使用する：
 
 ```python
 class RSIChecker(SignalChecker):
@@ -179,5 +179,5 @@ class RSIChecker(SignalChecker):
             return False
         
         latest_rsi = df["rsi"].iloc[-1]
-        return latest_rsi < 30  # Oversold condition
+        return latest_rsi < 30  # 売られ過ぎの条件
 ```
