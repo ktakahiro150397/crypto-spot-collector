@@ -32,11 +32,14 @@ class ActivityUpdaterCog(commands.Cog):
                     holdings, avg_price = repo.get_current_position_and_avg_price(
                         symbol=asset.symbol
                     )
+                    current_price = 1.0
+                    if asset.symbol != "USDT":
+                        current_price = float(
+                            self.exchange.fetch_price(
+                                f"{asset.symbol}/USDT")["last"]
+                        )
                     asset.total_amount = holdings
-                    asset.current_value = holdings * float(
-                        self.exchange.fetch_price(
-                            f"{asset.symbol}/USDT")["last"]
-                    )
+                    asset.current_value = holdings * current_price
                     asset.profit_loss = asset.current_value - \
                         (holdings * avg_price)
 
