@@ -33,7 +33,7 @@ class BybitExchange():
         logger.info("Initializing Bybit exchange client")
         self.exchange = ccxt.bybit({
             'apiKey': apiKey,
-            "secret": secret,
+            "secret": secret
         })
         logger.info("Bybit exchange client initialized successfully")
 
@@ -198,9 +198,11 @@ class BybitExchange():
     def fetch_average_buy_price_spot(self, symbol: str) -> float:
         logger.debug(f"Fetching average buy price for {symbol} spot")
         try:
+            # 2025/01/01 以降の注文を取得(msで指定)
+            since_ms = int(datetime(2025, 11, 1).timestamp() * 1000)
             orders = self.exchange.fetch_closed_orders(
                 symbol=f"{symbol}/USDT",
-                since=None,
+                since=since_ms,
                 limit=100,
                 params={}
             )
@@ -229,35 +231,97 @@ class BybitExchange():
                 f"Failed to fetch average buy price for {symbol} spot: {e}")
             raise
 
+    def fetch_close_orders_all(self, symbol: str) -> list[dict[str, Any]]:
+        logger.debug(f"Fetching all closed orders for {symbol} spot")
+        all_orders: list[dict[str, Any]] = []
+        try:
+            since_ms = int(datetime(2025, 11, 1).timestamp() * 1000)
+            now_ms = int(datetime.now().timestamp() * 1000)
+            seven_days_ms = 7 * 24 * 60 * 60 * 1000  # 7日間をミリ秒に変換
+
+            while since_ms < now_ms:
+                # 7日間の終了時刻を計算（今日の日付を超えないように）
+                until_ms = min(since_ms + seven_days_ms, now_ms)
+
+                logger.debug(
+                    f"Fetching orders from {datetime.fromtimestamp(since_ms/1000)} to {datetime.fromtimestamp(until_ms/1000)}")
+
+                orders = self.exchange.fetch_closed_orders(
+                    symbol=f"{symbol}/USDT",
+                    since=since_ms,
+                    limit=100,
+                    params={
+                        "until": until_ms,
+                        "paginate": True
+                    }
+                )
+
+                if orders:
+                    logger.debug(
+                        f"Fetched {len(orders)} orders, total so far: {len(all_orders)}")
+                    all_orders.extend(orders)
+
+                # 次の7日間の開始点を設定
+                since_ms = until_ms + 1
+
+            logger.info(
+                f"Total closed orders fetched for {symbol} spot: {len(all_orders)}")
+            return all_orders
+
+        except Exception as e:
+            logger.error(
+                f"Failed to fetch closed orders for {symbol} spot: {e}")
+            raise
+
     def get_current_spot_pnl(self, symbol: str) -> float:
         try:
-            orders = self.exchange.fetch_closed_orders(
-                symbol=f"{symbol}/USDT",
-                since=None,
-                limit=100,
-                params={}
-            )
+            orders = self.fetch_close_orders_all(symbol=symbol)
+
             buy_orders = [
                 order for order in orders if order['side'] == 'buy' and order['status'] == 'closed']
             total_cost = sum(
                 float(order['cost']) for order in buy_orders)
             total_amount = sum(
                 float(order['amount']) for order in buy_orders)
+            total_fee_amount = sum(
+                float(order['fee']['cost']) for order in buy_orders
+            )
+
+            for buy_order in buy_orders:
+                logger.debug(
+                    f"Buy Order - ID: {buy_order['id']}, Amount: {buy_order['amount']}, Cost: {buy_order['cost']}, Fee: {buy_order['fee']['cost']}")
+
+            sell_orders = [
+                order for order in orders if order['side'] == 'sell' and order['status'] == 'closed']
+            total_sell_value = sum(
+                float(order['cost']) for order in sell_orders)
+            total_amount_sold = sum(
+                float(order['filled']) for order in sell_orders)
 
             if total_amount == 0:
                 logger.warning(
                     f"No completed buy orders found for {symbol} spot")
                 return 0.0
 
+            current_spot_amount = total_amount - total_fee_amount - total_amount_sold
+
             logger.debug(
-                f"Total cost: {total_cost}, Total amount: {total_amount}")
+                f"Total buy cost: {total_cost}, Total buy amount: {total_amount}, Total buy fee amount: {total_fee_amount}")
+            logger.debug(
+                f"Total sell value: {total_sell_value}, Total amount sold: {total_amount_sold}"
+            )
+            logger.debug(
+                f"Current spot amount for {symbol}: {current_spot_amount}")
 
             average_price = total_cost / total_amount
+
             logger.info(
                 f"Average buy price for {symbol} spot: {average_price}")
 
             current_price = self.fetch_price(f"{symbol}/USDT")["last"]
-            pnl = round((current_price - average_price) * total_amount, 5)
+
+            pnl = round((current_price - average_price)
+                        * current_spot_amount, 5)
             logger.info(
                 f"Current PnL for {symbol} spot: {pnl} (Current Price: {current_price})")
 

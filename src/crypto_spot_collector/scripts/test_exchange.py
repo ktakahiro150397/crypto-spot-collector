@@ -18,60 +18,71 @@ async def main() -> None:
         secret=secrets["bybit"]["secret"]
     )
 
-    portfolio = bybit_exchange.get_spot_portfolio()
-    print("spot portfolio:")
-    for asset in portfolio:
-        print(
-            f"Asset: {asset.symbol} | Total Amount: {asset.total_amount} | Current Value: {asset.current_value} | PnL: {asset.profit_loss}"
-        )
+    # average = bybit_exchange.fetch_average_buy_price_spot("LTC")
+    # print(f"ltc average buy price: {average}")
 
-    # ポートフォリオデータをDataFrameに変換
-    portfolio_data = []
-    for asset in portfolio:
-        portfolio_data.append({
-            'Symbol': asset.symbol,
-            'Total_Amount': asset.total_amount,
-            'Current_Value': asset.current_value,
-            'PnL': asset.profit_loss
-        })
+    ltc = bybit_exchange.get_current_spot_pnl("LTC")
+    print(f"ltc pnl: {ltc:+.5f} USDT")
 
-    df = pd.DataFrame(portfolio_data)
-    print("\nPortfolio DataFrame:")
-    print(df)
+    # all_orders = bybit_exchange.fetch_close_orders_all(
+    #     symbol="LTC"
+    # )
+    # print(f"all ltc orders: {all_orders}")
 
-    # グラフの表示
-    if not df.empty:
-        # 日本語フォントの設定
-        plt.rcParams['font.family'] = 'DejaVu Sans'
+    # portfolio = bybit_exchange.get_spot_portfolio()
+    # print("spot portfolio:")
+    # for asset in portfolio:
+    #     print(
+    #         f"Asset: {asset.symbol} | Total Amount: {asset.total_amount} | Current Value: {asset.current_value} | PnL: {asset.profit_loss}"
+    #     )
 
-        # サブプロットの作成
-        fig, axes = plt.subplots(1, 2, figsize=(15, 6))
-        fig.suptitle('Cryptocurrency Portfolio Analysis', fontsize=16)
+    # # ポートフォリオデータをDataFrameに変換
+    # portfolio_data = []
+    # for asset in portfolio:
+    #     portfolio_data.append({
+    #         'Symbol': asset.symbol,
+    #         'Total_Amount': asset.total_amount,
+    #         'Current_Value': asset.current_value,
+    #         'PnL': asset.profit_loss
+    #     })
 
-        # 1. 現在価値の棒グラフ
-        axes[0].bar(df['Symbol'], df['Current_Value'])
-        axes[0].set_title('Current Value by Asset')
-        axes[0].set_ylabel('Value (USDT)')
-        axes[0].tick_params(axis='x', rotation=45)
+    # df = pd.DataFrame(portfolio_data)
+    # print("\nPortfolio DataFrame:")
+    # print(df)
 
-        # 2. PnLの棒グラフ（正負で色分け）
-        colors = ['green' if x >= 0 else 'red' for x in df['PnL']]
-        axes[1].bar(df['Symbol'], df['PnL'], color=colors)
-        axes[1].set_title('Profit & Loss by Asset')
-        axes[1].set_ylabel('PnL (USDT)')
-        axes[1].tick_params(axis='x', rotation=45)
-        axes[1].axhline(y=0, color='black', linestyle='-', alpha=0.3)
+    # # グラフの表示
+    # if not df.empty:
+    #     # 日本語フォントの設定
+    #     plt.rcParams['font.family'] = 'DejaVu Sans'
 
-        plt.tight_layout()
+    #     # サブプロットの作成
+    #     fig, axes = plt.subplots(1, 2, figsize=(15, 6))
+    #     fig.suptitle('Cryptocurrency Portfolio Analysis', fontsize=16)
 
-        # 画像として保存
-        plt.savefig('portfolio_analysis.png', dpi=300, bbox_inches='tight')
-        print("\nグラフを 'portfolio_analysis.png' として保存しました")
+    #     # 1. 現在価値の棒グラフ
+    #     axes[0].bar(df['Symbol'], df['Current_Value'])
+    #     axes[0].set_title('Current Value by Asset')
+    #     axes[0].set_ylabel('Value (USDT)')
+    #     axes[0].tick_params(axis='x', rotation=45)
 
-        # グラフを表示
-        plt.show()
-    else:
-        print("ポートフォリオデータが空です")
+    #     # 2. PnLの棒グラフ（正負で色分け）
+    #     colors = ['green' if x >= 0 else 'red' for x in df['PnL']]
+    #     axes[1].bar(df['Symbol'], df['PnL'], color=colors)
+    #     axes[1].set_title('Profit & Loss by Asset')
+    #     axes[1].set_ylabel('PnL (USDT)')
+    #     axes[1].tick_params(axis='x', rotation=45)
+    #     axes[1].axhline(y=0, color='black', linestyle='-', alpha=0.3)
+
+    #     plt.tight_layout()
+
+    #     # 画像として保存
+    #     plt.savefig('portfolio_analysis.png', dpi=300, bbox_inches='tight')
+    #     print("\nグラフを 'portfolio_analysis.png' として保存しました")
+
+    #     # グラフを表示
+    #     plt.show()
+    # else:
+    #     print("ポートフォリオデータが空です")
 
     # overall_pnl = 0.0
     # for asset in portfolio:
