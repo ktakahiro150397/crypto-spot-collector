@@ -49,6 +49,27 @@ CREATE TABLE IF NOT EXISTS trade_data (
     INDEX idx_is_spot (is_spot)
 ) COMMENT='取引データテーブル';
 
+-- 注文テーブル
+CREATE TABLE IF NOT EXISTS orders (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    order_id VARCHAR(100) NOT NULL UNIQUE COMMENT '取引所の注文ID',
+    cryptocurrency_id INT NOT NULL,
+    symbol VARCHAR(20) NOT NULL COMMENT '通貨ペア (BTC/USDT等)',
+    side ENUM('buy', 'sell') NOT NULL COMMENT '売買方向 (buy/sell)',
+    order_type ENUM('limit', 'market') NOT NULL COMMENT '注文種類 (limit: 指値, market: 成り行き)',
+    price DECIMAL(20, 8) NOT NULL COMMENT '注文価格',
+    quantity DECIMAL(20, 8) NOT NULL COMMENT '注文数量',
+    status ENUM('open', 'closed', 'canceled') NOT NULL DEFAULT 'open' COMMENT '注文ステータス (open: 注文中, closed: 約定済み, canceled: キャンセル済み)',
+    order_timestamp_utc TIMESTAMP NOT NULL COMMENT '注文日時（UTC）',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (cryptocurrency_id) REFERENCES cryptocurrencies(id),
+    INDEX idx_order_id (order_id),
+    INDEX idx_crypto_status (cryptocurrency_id, status),
+    INDEX idx_symbol_status (symbol, status),
+    INDEX idx_order_timestamp (order_timestamp_utc)
+) COMMENT='注文テーブル';
+
 -- 初期データの投入
 INSERT IGNORE INTO cryptocurrencies (symbol, name) VALUES 
 ('BTC', 'Bitcoin'),

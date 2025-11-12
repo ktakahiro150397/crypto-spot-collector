@@ -37,6 +37,7 @@ class Cryptocurrency(Base):
     # Relationships
     ohlcv_data = relationship("OHLCVData", back_populates="cryptocurrency")
     trade_data = relationship("TradeData", back_populates="cryptocurrency")
+    orders = relationship("Order", back_populates="cryptocurrency")
 
     def __repr__(self) -> str:
         return f"<Cryptocurrency(symbol='{self.symbol}', name='{self.name}')>"
@@ -135,4 +136,66 @@ class TradeData(Base):
             f"<TradeData(cryptocurrency_id={self.cryptocurrency_id}, "
             f"exchange='{self.exchange_name}', position='{self.position_type}', "
             f"price={self.price}, timestamp_utc={self.timestamp_utc})>"
+        )
+
+
+class Order(Base):
+    """Order model for tracking buy/sell orders."""
+
+    __tablename__ = "orders"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    order_id = Column(String(100), unique=True, nullable=False, comment="取引所の注文ID")
+    cryptocurrency_id = Column(
+        Integer, ForeignKey("cryptocurrencies.id"), nullable=False
+    )
+    symbol = Column(String(20), nullable=False, comment="通貨ペア (BTC/USDT等)")
+    side: Column[Enum] = Column(
+        Enum("buy", "sell", name="order_side_enum"),
+        nullable=False,
+        comment="売買方向 (buy/sell)",
+    )
+    order_type: Column[Enum] = Column(
+        Enum("limit", "market", name="order_type_enum"),
+        nullable=False,
+        comment="注文種類 (limit: 指値, market: 成り行き)",
+    )
+    price: Column[DECIMAL] = Column(
+        DECIMAL(20, 8), nullable=False, comment="注文価格"
+    )
+    quantity: Column[DECIMAL] = Column(
+        DECIMAL(20, 8), nullable=False, comment="注文数量"
+    )
+    status: Column[Enum] = Column(
+        Enum("open", "closed", "canceled", name="order_status_enum"),
+        nullable=False,
+        default="open",
+        comment="注文ステータス (open: 注文中, closed: 約定済み, canceled: キャンセル済み)",
+    )
+    order_timestamp_utc = Column(
+        TIMESTAMP, nullable=False, comment="注文日時（UTC）"
+    )
+    created_at = Column(TIMESTAMP, server_default=func.current_timestamp())
+    updated_at = Column(
+        TIMESTAMP,
+        server_default=func.current_timestamp(),
+        onupdate=func.current_timestamp(),
+    )
+
+    # Relationships
+    cryptocurrency = relationship("Cryptocurrency", back_populates="orders")
+
+    # Indexes
+    __table_args__ = (
+        Index("idx_order_id", "order_id"),
+        Index("idx_crypto_status", "cryptocurrency_id", "status"),
+        Index("idx_symbol_status", "symbol", "status"),
+        Index("idx_order_timestamp", "order_timestamp_utc"),
+    )
+
+    def __repr__(self) -> str:
+        return (
+            f"<Order(order_id='{self.order_id}', symbol='{self.symbol}', "
+            f"side='{self.side}', type='{self.order_type}', "
+            f"status='{self.status}', price={self.price})>"
         )
