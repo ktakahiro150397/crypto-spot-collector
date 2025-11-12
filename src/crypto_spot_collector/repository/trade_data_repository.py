@@ -42,7 +42,7 @@ class TradeDataRepository:
         cryptocurrency_name: str,
         exchange_name: str,
         trade_id: str,
-        status: Literal["OPEN", "CANCELLED", "CLOSED"],
+        status: Literal["OPEN", "CANCELED", "CLOSED"],
         position_type: Literal["LONG", "SHORT"],
         is_spot: bool,
         leverage_ratio: float,
@@ -57,7 +57,7 @@ class TradeDataRepository:
             cryptocurrency_name: Name of the cryptocurrency (e.g., 'BTC').
             exchange_name: Name of the exchange (e.g., 'Binance').
             trade_id: Unique trade identifier from the exchange.
-            status: Trade status ('OPEN', 'CANCELLED', 'CLOSED').
+            status: Trade status ('OPEN', 'CANCELED', 'CLOSED').
             position_type: 'LONG' or 'SHORT'.
             is_spot: True if spot trade, False if margin/futures.
             leverage_ratio: Leverage ratio (1.00 for spot trades).
@@ -97,6 +97,11 @@ class TradeDataRepository:
         elif position_type.upper() == "SELL":
             position_type = "SHORT"
 
+        if status is None:
+            status = 'OPEN'
+        else:
+            status = status.upper()
+
         if trade_data:
             # Update existing record
             trade_data.status = status
@@ -129,13 +134,13 @@ class TradeDataRepository:
     def update_trade_status_by_trade_id(
         self,
         trade_id: str,
-        new_status: Literal["OPEN", "CANCELLED", "CLOSED"]
+        new_status: Literal["OPEN", "CANCELED", "CLOSED"]
     ) -> None:
         """Update the status of a trade data record by trade ID.
 
         Args:
             trade_id: Unique trade identifier from the exchange.
-            new_status: New status to set ('OPEN', 'CANCELLED', 'CLOSED').
+            new_status: New status to set ('OPEN', 'CANCELED', 'CLOSED').
         """
         trade_data = (
             self.session.query(TradeData)

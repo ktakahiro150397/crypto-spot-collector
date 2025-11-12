@@ -100,7 +100,7 @@ class TradeData(Base):
     trade_id = Column(String(100), nullable=False,
                       comment="Unique trade identifier from the exchange")
     status: Column[Enum] = Column(
-        Enum("OPEN", "CANCELLED", "CLOSED", name="status_enum"),
+        Enum("OPEN", "CANCELED", "CLOSED", name="status_enum"),
         nullable=False,
         comment="Trade status",
     )
@@ -125,7 +125,7 @@ class TradeData(Base):
     fee: Column[DECIMAL] = Column(
         DECIMAL(20, 8), nullable=False, comment="transaction fee (if any / as USDT)"
     )
-    timestamp_utc = Column(TIMESTAMP, nullable=False,
+    timestamp_utc = Column(TIMESTAMP, nullable=True,
                            comment="trade execution time (UTC)")
     created_at = Column(TIMESTAMP, server_default=func.current_timestamp())
 

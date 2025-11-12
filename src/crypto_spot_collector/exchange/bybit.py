@@ -5,6 +5,8 @@ from typing import Any
 import ccxt
 from loguru import logger
 
+from crypto_spot_collector.repository.trade_data_repository import TradeDataRepository
+
 # bybit.enable_demo_trading(enable=True)
 
 
@@ -35,6 +37,7 @@ class BybitExchange():
             'apiKey': apiKey,
             "secret": secret
         })
+        self.repo_trade_data = TradeDataRepository()
         logger.info("Bybit exchange client initialized successfully")
 
     def fetch_balance(self) -> Any:
@@ -179,6 +182,23 @@ class BybitExchange():
             logger.success(
                 f"Spot order created successfully for {symbol}: Order ID {order.get('id', 'N/A')}")
 
+            # DBへ登録
+            self.repo_trade_data.create_or_update_trade_data(
+                cryptocurrency_name=symbol.replace("/USDT", ""),
+                exchange_name="bybit",
+                trade_id=order['id'],
+                status='OPEN',
+                position_type='LONG',
+                is_spot=True,
+                leverage_ratio=1.00,
+                price=limit_price,
+                quantity=buy_amount,
+                fee=order['fee']['cost'] *
+                order['price'] if order['fee'] else 0,  # feeをUSDT換算
+                timestamp_utc=datetime.fromtimestamp(
+                    order['timestamp'] / 1000) if order['timestamp'] in order else None,
+            )
+
             # 結果をSpotOrderResultクラスにまとめる
             result = SpotOrderResult(
                 order_id=order.get('id', 'N/A'),
@@ -277,17 +297,34 @@ class BybitExchange():
         logger.debug(f"Fetching all open orders for {symbol} spot")
         all_orders: list[dict[str, Any]] = []
         try:
-            orders = self.exchange.fetch_open_orders(
-                symbol=f"{symbol}/USDT",
-                params={
-                    "paginate": True
-                }
-            )
+            since_ms = int(datetime(2025, 11, 1).timestamp() * 1000)
+            now_ms = int(datetime.now().timestamp() * 1000)
+            seven_days_ms = 7 * 24 * 60 * 60 * 1000  # 7日間をミリ秒に変換
 
-            if orders:
+            while since_ms < now_ms:
+                # 7日間の終了時刻を計算（今日の日付を超えないように）
+                until_ms = min(since_ms + seven_days_ms, now_ms)
+
                 logger.debug(
-                    f"Fetched {len(orders)} open orders")
-                all_orders.extend(orders)
+                    f"Fetching open orders from {datetime.fromtimestamp(since_ms/1000)} to {datetime.fromtimestamp(until_ms/1000)}")
+
+                orders = self.exchange.fetch_open_orders(
+                    symbol=f"{symbol}/USDT",
+                    since=since_ms,
+                    limit=100,
+                    params={
+                        "until": until_ms,
+                        "paginate": True
+                    }
+                )
+
+                if orders:
+                    logger.debug(
+                        f"Fetched {len(orders)} open orders, total so far: {len(all_orders)}")
+                    all_orders.extend(orders)
+
+                # 次の7日間の開始点を設定
+                since_ms = until_ms + 1
 
             logger.info(
                 f"Total open orders fetched for {symbol} spot: {len(all_orders)}")
@@ -296,6 +333,48 @@ class BybitExchange():
         except Exception as e:
             logger.error(
                 f"Failed to fetch open orders for {symbol} spot: {e}")
+            raise
+
+    def fetch_canceled_orders_all(self, symbol: str) -> list[dict[str, Any]]:
+        logger.debug(f"Fetching all canceled orders for {symbol} spot")
+        all_orders: list[dict[str, Any]] = []
+        try:
+            since_ms = int(datetime(2025, 11, 1).timestamp() * 1000)
+            now_ms = int(datetime.now().timestamp() * 1000)
+            seven_days_ms = 7 * 24 * 60 * 60 * 1000  # 7日間をミリ秒に変換
+
+            while since_ms < now_ms:
+                # 7日間の終了時刻を計算（今日の日付を超えないように）
+                until_ms = min(since_ms + seven_days_ms, now_ms)
+
+                logger.debug(
+                    f"Fetching canceled orders from {datetime.fromtimestamp(since_ms/1000)} to {datetime.fromtimestamp(until_ms/1000)}")
+
+                orders = self.exchange.fetch_canceled_orders(
+                    symbol=f"{symbol}/USDT",
+                    since=since_ms,
+                    limit=100,
+                    params={
+                        "until": until_ms,
+                        "paginate": True
+                    }
+                )
+
+                if orders:
+                    logger.debug(
+                        f"Fetched {len(orders)} canceled orders, total so far: {len(all_orders)}")
+                    all_orders.extend(orders)
+
+                # 次の7日間の開始点を設定
+                since_ms = until_ms + 1
+
+            logger.info(
+                f"Total canceled orders fetched for {symbol} spot: {len(all_orders)}")
+            return all_orders
+
+        except Exception as e:
+            logger.error(
+                f"Failed to fetch canceled orders for {symbol} spot: {e}")
             raise
 
     def get_current_spot_pnl(self, symbol: str) -> float:
