@@ -5,6 +5,7 @@ from typing import Any
 
 from loguru import logger
 
+from crypto_spot_collector.exchange.bybit import BybitExchange
 from crypto_spot_collector.repository.trade_data_repository import TradeDataRepository
 
 
@@ -102,3 +103,24 @@ def create_update_trade_data(
                 fee=fee,
                 timestamp_utc=timestamp_datetime,
             )
+
+
+def get_current_pnl_from_db(exchange: BybitExchange, symbol: str) -> float:
+    """Calculate current PnL from the database trade data.
+
+    Returns:
+        float: Current profit and loss.
+    """
+    with TradeDataRepository() as repo:
+        holdings, average_buy_price = repo.get_current_position_and_avg_price(
+            symbol=symbol
+        )
+
+        current_price = float(exchange.fetch_price(
+            symbol=f"{symbol.upper()}/USDT")["last"])
+
+        pnl = (current_price - average_buy_price) * holdings
+
+        return pnl
+
+    return 0.0

@@ -3,6 +3,7 @@ from matplotlib import pyplot as plt
 
 from crypto_spot_collector.exchange.bybit import BybitExchange
 from crypto_spot_collector.utils.secrets import load_config
+from crypto_spot_collector.utils.trade_data import get_current_pnl_from_db
 
 
 async def main() -> None:
@@ -17,6 +18,9 @@ async def main() -> None:
         apiKey=secrets["bybit"]["apiKey"],
         secret=secrets["bybit"]["secret"]
     )
+
+    pnl = get_current_pnl_from_db(bybit_exchange, "LTC")
+    print(f"Current LTC PnL: {pnl:+.5f} USDT")
 
     # average = bybit_exchange.fetch_average_buy_price_spot("LTC")
     # print(f"ltc average buy price: {average}")
@@ -95,10 +99,10 @@ async def main() -> None:
     # print(f"xrp price : {xrp}")
     # print(f"xrp last price : {xrp['last']}")
 
-    result = bybit_exchange.create_order_spot(1, "DOGE")
-    print(f"order result : {result}")
+    # result = bybit_exchange.create_order_spot(1, "DOGE")
+    # print(f"order result : {result}")
 
-    # bnb_average = bybit_exchange.fetch_average_buy_price_spot("BNB")
+    # # bnb_average = bybit_exchange.fetch_average_buy_price_spot("BNB")
     # print(f"bnb average price : {bnb_average}")
 
     # print(datetime.now())
