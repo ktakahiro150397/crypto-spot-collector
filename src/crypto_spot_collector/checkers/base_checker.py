@@ -1,6 +1,7 @@
 """Base checker interface for trading signal detection."""
 
 from abc import ABC, abstractmethod
+from typing import Any
 
 import pandas as pd
 
@@ -9,7 +10,7 @@ class SignalChecker(ABC):
     """Abstract base class for trading signal checkers."""
 
     @abstractmethod
-    def check(self, df: pd.DataFrame, **kwargs) -> bool:
+    def check(self, df: pd.DataFrame, **kwargs: Any) -> bool:
         """
         Check for trading signals in the provided DataFrame.
 

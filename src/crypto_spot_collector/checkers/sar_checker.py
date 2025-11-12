@@ -1,5 +1,7 @@
 """SAR (Parabolic SAR) signal checker implementation."""
 
+from typing import Any
+
 import pandas as pd
 from loguru import logger
 
@@ -18,7 +20,7 @@ class SARChecker(SignalChecker):
         """
         self.consecutive_positive_count = consecutive_positive_count
 
-    def check(self, df: pd.DataFrame, **kwargs) -> bool:
+    def check(self, df: pd.DataFrame, **kwargs: Any) -> bool:
         """
         Check for SAR buy signal.
 
@@ -47,7 +49,8 @@ class SARChecker(SignalChecker):
                 break
             consecutive_positive += 1
 
-        logger.debug(f"Consecutive positive SAR values: {consecutive_positive}")
+        logger.debug(
+            f"Consecutive positive SAR values: {consecutive_positive}")
 
         # 連続する数値が指定数以外の場合はFalse
         if consecutive_positive != self.consecutive_positive_count:
