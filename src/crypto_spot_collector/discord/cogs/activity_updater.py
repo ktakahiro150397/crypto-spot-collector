@@ -5,6 +5,7 @@ from discord.ext import commands, tasks
 from loguru import logger
 
 from crypto_spot_collector.exchange.bybit import BybitExchange
+from crypto_spot_collector.repository.trade_data_repository import TradeDataRepository
 
 
 class ActivityUpdaterCog(commands.Cog):
@@ -25,6 +26,19 @@ class ActivityUpdaterCog(commands.Cog):
             # Get portfolio data
             portfolio = self.exchange.get_spot_portfolio()
             free_usdt = self.exchange.fetch_free_usdt()
+
+            with TradeDataRepository() as repo:
+                for asset in portfolio:
+                    holdings, avg_price = repo.get_current_position_and_avg_price(
+                        symbol=asset.symbol
+                    )
+                    asset.total_amount = holdings
+                    asset.current_value = holdings * float(
+                        self.exchange.fetch_price(
+                            f"{asset.symbol}/USDT")["last"]
+                    )
+                    asset.profit_loss = asset.current_value - \
+                        (holdings * avg_price)
 
             # Calculate total PnL
             total_pnl = sum(
@@ -63,8 +77,6 @@ class ActivityUpdaterCog(commands.Cog):
             if self.bot.application is not None:
                 description_text = (
                     f"PnL : {pnl_str} ({pnl_pct_str}%)\n"
-                    f"Update : {jst_time_str}\n"
-                    f"Version : {self.bot.version}\n\n"  # type: ignore
                     f"--- Portfolio Details ---\n"
                 )
                 description_text += f"Free USDT : ${free_usdt:.2f}\n\n"
@@ -78,6 +90,11 @@ class ActivityUpdaterCog(commands.Cog):
                         description_text += (
                             f"{asset.symbol:<4} : {pnl_percent:>+6.2f}%\n"
                         )
+
+                description_text += "\n\n"
+                # type: ignore
+                description_text += f"Version : {self.bot.version}\n"
+                description_text += f"Updated On {jst_time_str}"
 
                 await self.bot.application.edit(description=description_text)
                 logger.debug(
