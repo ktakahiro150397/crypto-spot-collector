@@ -16,6 +16,8 @@ from crypto_spot_collector.exchange.bybit import BybitExchange
 from crypto_spot_collector.notification.discord import discordNotification
 from crypto_spot_collector.providers.market_data_provider import MarketDataProvider
 from crypto_spot_collector.repository.ohlcv_repository import OHLCVRepository
+from crypto_spot_collector.repository.order_repository import OrderRepository
+from crypto_spot_collector.utils.order_utils import update_open_orders
 from crypto_spot_collector.utils.secrets import load_config
 
 # ログ設定
@@ -196,6 +198,14 @@ async def main() -> None:
         #     # 毎日0時に成績通知
         #     await notify_current_portfolio()
 
+        # Update order statuses every hour
+        try:
+            logger.info("Updating order statuses...")
+            order_repo = OrderRepository()
+            update_open_orders(bybit_exchange, order_repo)
+        except Exception as e:
+            logger.error(f"Failed to update order statuses: {e}")
+
 
 async def check_signal(
     startDate: datetime,
@@ -241,6 +251,25 @@ async def check_signal(
                 amountByUSDT=amountByUSDT, symbol=symbol
             )
             logger.success(f"Successfully created spot order for {symbol}")
+
+            # Record order to database
+            try:
+                order_repo = OrderRepository()
+                order_repo.create_order(
+                    order_id=order_result.order_id,
+                    symbol=order_result.symbol,
+                    side="buy",
+                    order_type="limit",
+                    price=order_result.price,
+                    quantity=order_result.amount,
+                    status="open",
+                    order_timestamp_utc=datetime.now(timezone.utc)
+                )
+                logger.info(f"Recorded order {order_result.order_id} to database")
+            except Exception as e:
+                logger.error(f"Failed to record order to database: {e}")
+                # Don't return here, continue with Discord notification
+
         except Exception as e:
             logger.error(f"Error creating spot order for {symbol}: {e}")
             await notificator.send_notification_async(
@@ -276,6 +305,7 @@ async def check_signal(
             image_buffers=plot_buf
         )
         logger.info(f"Sent Discord notification for {symbol}")
+
 
         for i, sar_up in enumerate(df["sar_up"].tail(10)[::-1]):
             logger.debug(f"  {i}: {sar_up}")
