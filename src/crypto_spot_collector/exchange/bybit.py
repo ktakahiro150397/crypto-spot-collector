@@ -273,6 +273,31 @@ class BybitExchange():
                 f"Failed to fetch closed orders for {symbol} spot: {e}")
             raise
 
+    def fetch_open_orders_all(self, symbol: str) -> list[dict[str, Any]]:
+        logger.debug(f"Fetching all open orders for {symbol} spot")
+        all_orders: list[dict[str, Any]] = []
+        try:
+            orders = self.exchange.fetch_open_orders(
+                symbol=f"{symbol}/USDT",
+                params={
+                    "paginate": True
+                }
+            )
+
+            if orders:
+                logger.debug(
+                    f"Fetched {len(orders)} open orders")
+                all_orders.extend(orders)
+
+            logger.info(
+                f"Total open orders fetched for {symbol} spot: {len(all_orders)}")
+            return all_orders
+
+        except Exception as e:
+            logger.error(
+                f"Failed to fetch open orders for {symbol} spot: {e}")
+            raise
+
     def get_current_spot_pnl(self, symbol: str) -> float:
         try:
             orders = self.fetch_close_orders_all(symbol=symbol)

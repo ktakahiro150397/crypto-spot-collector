@@ -2,13 +2,13 @@
 
 
 from datetime import datetime
-from typing import List, Literal, Optional, Type
+from typing import Literal, Optional, Type
 
-from sqlalchemy import Column, and_, func, text
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy import and_
+from sqlalchemy.orm import Session
 
 from ..database import get_db_session
-from ..models import Cryptocurrency, OHLCVData, TradeData
+from ..models import Cryptocurrency, TradeData
 
 
 class TradeDataRepository:
@@ -90,6 +90,12 @@ class TradeDataRepository:
             )
             .one_or_none()
         )
+
+        # よしなに変換
+        if position_type.upper() == "BUY":
+            position_type = "LONG"
+        elif position_type.upper() == "SELL":
+            position_type = "SHORT"
 
         if trade_data:
             # Update existing record
