@@ -1,9 +1,10 @@
 """Trade data repository for persisting and retrieving trade data."""
 
-
 from datetime import datetime
+from decimal import Decimal
 from typing import Literal, Optional, Type
 
+from loguru import logger
 from sqlalchemy import and_
 from sqlalchemy.orm import Session
 
@@ -154,3 +155,92 @@ class TradeDataRepository:
 
         trade_data.status = new_status
         self.session.commit()
+
+    def get_current_position_and_avg_price(
+        self,
+        symbol: str
+    ) -> tuple[float, float]:
+        """Get current holdings and average acquisition price for a given cryptocurrency symbol.
+
+        Args:
+            symbol: Symbol of the cryptocurrency (e.g., 'BTC').
+        Returns:
+            Tuple of (current_quantity, average_price).
+            Returns (0.0, 0.0) if no holdings or no records found.
+        """
+        crypto = (
+            self.session.query(Cryptocurrency)
+            .filter(Cryptocurrency.symbol == symbol)
+            .one_or_none()
+        )
+        if not crypto:
+            return 0.0, 0.0
+
+        # Get all trades for this cryptocurrency ordered by timestamp
+        trades = (
+            self.session.query(TradeData)
+            .filter(
+                and_(
+                    TradeData.cryptocurrency_id == crypto.id,
+                    TradeData.status == "CLOSED",
+                )
+            )
+            .order_by(TradeData.timestamp_utc)
+            .all()
+        )
+
+        if not trades:
+            return 0.0, 0.0
+
+        total_quantity = Decimal('0.0')  # Current holdings
+        total_cost = Decimal('0.0')      # Total cost basis
+
+        for trade in trades:
+            if trade.position_type == "LONG":  # Purchase
+                # Add to holdings and update total cost
+                # Use Decimal for precise calculations
+                purchase_cost = trade.price * trade.quantity
+                total_cost += purchase_cost
+                total_quantity += trade.quantity - \
+                    (trade.fee / trade.price)  # Adjust quantity for fee
+
+            elif trade.position_type == "SHORT":  # Sale
+                # Reduce holdings (average price remains the same)
+                sell_quantity = min(trade.quantity, total_quantity)
+                if total_quantity > 0:
+                    # Calculate current average price
+                    current_avg_price = total_cost / total_quantity
+                    # Reduce cost basis proportionally
+                    total_cost -= current_avg_price * \
+                        sell_quantity - (trade.fee)
+
+                total_quantity -= sell_quantity
+                # Prevent negative holdings
+                total_quantity = max(Decimal('0.0'), total_quantity)
+
+        # Calculate final average price
+        if total_quantity > 0:
+            average_price = total_cost / total_quantity
+
+            logger.debug(
+                f"Computed for {symbol}: Total Quantity = {total_quantity}, Total Cost = {total_cost}, Average Price = {average_price}"
+            )
+            return float(total_quantity), float(average_price)
+        else:
+            return 0.0, 0.0
+
+    def get_average_buy_price_by_symbol(
+        self,
+        symbol: str
+    ) -> float:
+        """Get average acquisition price for a given cryptocurrency symbol.
+
+        This method is deprecated. Use get_current_position_and_avg_price() instead.
+
+        Args:
+            symbol: Symbol of the cryptocurrency (e.g., 'BTC').
+        Returns:
+            Average acquisition price or 0.0 if no holdings.
+        """
+        _, avg_price = self.get_current_position_and_avg_price(symbol)
+        return avg_price

@@ -29,24 +29,12 @@ def create_update_trade_data(
             timestamp_datetime = datetime.fromtimestamp(
                 timestamp_ms / 1000)
 
-            repo.create_or_update_trade_data(
-                cryptocurrency_name=symbol.upper(),
-                exchange_name="bybit",
-                trade_id=trade['id'],
-                status=trade['status'],
-                position_type=trade['side'],
-                is_spot=True,
-                leverage_ratio=1.00,
-                price=trade['price'],
-                quantity=trade['amount'],
-                fee=trade['fee']['cost'] * trade['price'],  # feeをUSDT換算
-                timestamp_utc=timestamp_datetime,
-            )
-        for trade in open_trades:
-            # Unixタイムスタンプ（ミリ秒）をdatetimeオブジェクトに変換
-            timestamp_ms = trade['timestamp']
-            timestamp_datetime = datetime.fromtimestamp(
-                timestamp_ms / 1000)
+            if trade['fee'] is None:
+                fee = 0
+            elif trade['fee']['currency'].upper() == 'USDT':
+                fee = trade['fee']['cost']
+            else:
+                fee = trade['fee']['cost'] * trade['price']  # feeをUSDT換算
 
             repo.create_or_update_trade_data(
                 cryptocurrency_name=symbol.upper(),
@@ -58,7 +46,33 @@ def create_update_trade_data(
                 leverage_ratio=1.00,
                 price=trade['price'],
                 quantity=trade['amount'],
-                fee=0,  # 未決済トレードのfeeは0
+                fee=fee,  # feeをUSDT換算
+                timestamp_utc=timestamp_datetime,
+            )
+        for trade in open_trades:
+            # Unixタイムスタンプ（ミリ秒）をdatetimeオブジェクトに変換
+            timestamp_ms = trade['timestamp']
+            timestamp_datetime = datetime.fromtimestamp(
+                timestamp_ms / 1000)
+
+            if trade['fee'] is None:
+                fee = 0
+            elif trade['fee']['currency'].upper() == 'USDT':
+                fee = trade['fee']['cost']
+            else:
+                fee = trade['fee']['cost'] * trade['price']  # feeをUSDT換算
+
+            repo.create_or_update_trade_data(
+                cryptocurrency_name=symbol.upper(),
+                exchange_name="bybit",
+                trade_id=trade['id'],
+                status=trade['status'],
+                position_type=trade['side'],
+                is_spot=True,
+                leverage_ratio=1.00,
+                price=trade['price'],
+                quantity=trade['amount'],
+                fee=fee,
                 timestamp_utc=timestamp_datetime,
             )
 
@@ -68,6 +82,13 @@ def create_update_trade_data(
             timestamp_datetime = datetime.fromtimestamp(
                 timestamp_ms / 1000)
 
+            if trade['fee'] is None:
+                fee = 0
+            elif trade['fee']['currency'].upper() == 'USDT':
+                fee = trade['fee']['cost']
+            else:
+                fee = trade['fee']['cost'] * trade['price']  # feeをUSDT換算
+
             repo.create_or_update_trade_data(
                 cryptocurrency_name=symbol.upper(),
                 exchange_name="bybit",
@@ -78,6 +99,6 @@ def create_update_trade_data(
                 leverage_ratio=1.00,
                 price=trade['price'],
                 quantity=trade['amount'],
-                fee=0,  # キャンセルされたトレードのfeeは0
+                fee=fee,
                 timestamp_utc=timestamp_datetime,
             )

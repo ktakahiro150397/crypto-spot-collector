@@ -16,7 +16,7 @@ spot_symbol = ["btc", "eth", "xrp", "sol", "link",
                "avax", "hype", "bnb", "doge", "wld", "ltc", "pol",
                "xaut",]
 
-# spot_symbol = ["doge"]
+# spot_symbol = ["ltc"]
 
 
 async def main() -> None:
@@ -44,6 +44,20 @@ async def main() -> None:
             f"Total {len(open_trades)} open trade records fetched for {symbol.upper()}.")
         logger.info(
             f"Total {len(canceled_trades)} canceled trade records fetched for {symbol.upper()}.")
+
+        logger.debug(f"Closed Trades Details for {symbol.upper()}:")
+        for trade in closed_trades:
+            logger.debug(
+                f"type : {trade['side']}, price : {trade['price']}, amount: {trade['amount']}, fee: {trade['fee']}")
+
+        logger.debug(f"Open Trades Details for {symbol.upper()}:")
+        for trade in open_trades:
+            logger.debug(
+                f"price : {trade['price']}, amount: {trade['amount']}, fee: {trade['fee']}")
+        logger.debug(f"Canceled Trades Details for {symbol.upper()}:")
+        for trade in canceled_trades:
+            logger.debug(
+                f"price : {trade['price']}, amount: {trade['amount']}, fee: {trade['fee']}")
 
         create_update_trade_data(
             symbol=symbol,
