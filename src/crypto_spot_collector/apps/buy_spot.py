@@ -197,6 +197,61 @@ async def main() -> None:
         #     # 毎日0時に成績通知
         #     await notify_current_portfolio()
 
+        # Update order statuses every hour
+        try:
+            logger.info("Updating order statuses...")
+            await update_order_statuses()
+        except Exception as e:
+            logger.error(f"Failed to update order statuses: {e}")
+
+
+async def update_order_statuses() -> None:
+    """Update status of all open orders by checking with the exchange."""
+    try:
+        order_repo = OrderRepository()
+        open_orders = order_repo.get_open_orders()
+        logger.info(f"Found {len(open_orders)} open orders to check")
+
+        updated_count = 0
+        for order in open_orders:
+            try:
+                # Fetch order status from exchange
+                exchange_order = bybit_exchange.exchange.fetch_order(
+                    id=order.order_id,
+                    symbol=order.symbol
+                )
+
+                # Get status from exchange
+                exchange_status = exchange_order.get("status", "open")
+
+                # Map exchange status to our status
+                new_status = None
+                if exchange_status == "closed":
+                    new_status = "closed"
+                elif exchange_status == "canceled":
+                    new_status = "canceled"
+                elif exchange_status in ["open", "pending"]:
+                    new_status = "open"
+
+                # Update status if changed
+                if new_status and new_status != order.status:
+                    logger.info(
+                        f"Order {order.order_id} ({order.symbol}) status changed: "
+                        f"{order.status} -> {new_status}"
+                    )
+                    order_repo.update_order_status(order.order_id, new_status)
+                    updated_count += 1
+
+            except Exception as e:
+                logger.warning(
+                    f"Could not fetch order {order.order_id} from exchange: {e}"
+                )
+
+        logger.info(f"Updated {updated_count} order statuses")
+
+    except Exception as e:
+        logger.error(f"Error updating order statuses: {e}")
+
 
 async def check_signal(
     startDate: datetime,
