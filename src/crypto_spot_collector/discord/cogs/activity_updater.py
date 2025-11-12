@@ -62,7 +62,7 @@ class ActivityUpdaterCog(commands.Cog):
             # Update the bot's application description
             if self.bot.application is not None:
                 description_text = (
-                    f"PnL : {pnl_str} USDT ({pnl_pct_str}%)\n"
+                    f"PnL : {pnl_str} ({pnl_pct_str}%)\n"
                     f"Update : {jst_time_str}\n"
                     f"Version : {self.bot.version}\n\n"  # type: ignore
                     f"--- Portfolio Details ---\n"
@@ -72,7 +72,8 @@ class ActivityUpdaterCog(commands.Cog):
                     if asset.symbol != "USDT":
                         # Calculate PnL percentage relative to purchase price
                         pnl_percent = (
-                            asset.profit_loss / (asset.current_value - asset.profit_loss)
+                            asset.profit_loss /
+                            (asset.current_value - asset.profit_loss)
                         ) * 100 if (asset.current_value - asset.profit_loss) != 0 else 0
                         description_text += (
                             f"{asset.symbol:<4} : {pnl_percent:>+6.2f}%\n"
