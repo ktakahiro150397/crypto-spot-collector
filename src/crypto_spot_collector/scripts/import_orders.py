@@ -1,6 +1,6 @@
 """Script to import all orders from exchange API to database."""
 
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 from loguru import logger
@@ -69,12 +69,12 @@ def import_orders_for_symbol(
                 # Get order timestamp
                 timestamp_ms = order.get("timestamp", 0)
                 if timestamp_ms:
-                    order_timestamp = datetime.fromtimestamp(timestamp_ms / 1000)
+                    order_timestamp = datetime.fromtimestamp(timestamp_ms / 1000, tz=timezone.utc)
                 else:
                     logger.warning(
                         f"Order {order_id} has no timestamp, using current time"
                     )
-                    order_timestamp = datetime.utcnow()
+                    order_timestamp = datetime.now(timezone.utc)
 
                 # Create order in database
                 order_repo.create_order(

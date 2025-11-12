@@ -1,14 +1,13 @@
 """Tests for OrderRepository."""
 
 from datetime import datetime, timezone
-from decimal import Decimal
 
 import pytest
 from sqlalchemy import create_engine
-from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.orm import sessionmaker
 
 from crypto_spot_collector.database import Base
-from crypto_spot_collector.models import Cryptocurrency, Order
+from crypto_spot_collector.models import Cryptocurrency
 from crypto_spot_collector.repository.order_repository import OrderRepository
 
 
