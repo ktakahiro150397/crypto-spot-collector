@@ -198,10 +198,11 @@ async def main() -> None:
 
         for symbol in spot_symbol:
             closed_trades = bybit_exchange.fetch_close_orders_all(
-                symbol=symbol)
-            open_trades = bybit_exchange.fetch_open_orders_all(symbol=symbol)
+                symbol=symbol.upper())
+            open_trades = bybit_exchange.fetch_open_orders_all(
+                symbol=symbol.upper())
             canceled_trades = bybit_exchange.fetch_canceled_orders_all(
-                symbol=symbol)
+                symbol=symbol.upper())
             create_update_trade_data(
                 symbol=symbol,
                 open_trades=open_trades,
