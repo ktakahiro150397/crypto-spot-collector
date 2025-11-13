@@ -10,6 +10,7 @@ import pandas as pd
 import seaborn as sns
 from matplotlib import font_manager
 from matplotlib import pyplot as plt
+from matplotlib.offsetbox import AnnotationBbox, OffsetImage
 from PIL import Image
 from ta.trend import PSARIndicator
 
@@ -110,7 +111,7 @@ async def main() -> None:
 
     with TradeDataRepository() as repo:
         buy_trades: list[TradeData] = repo.get_closed_long_positions_date(
-            symbol="BTC",
+            symbol="XRP",
             start_date=startDate,
             end_date=endDate
         )
@@ -120,37 +121,10 @@ async def main() -> None:
 
         df = append_dates_with_nearest(df, "buy_date", buy_dates)
 
-    # buy_dates: list[datetime] = [
-    #     datetime(2025, 10, 26, 5, 10, 23),
-    #     datetime(2025, 10, 25, 7, 20, 48),
-    #     datetime(2025, 10, 25, 7, 12, 48),
-    # ]
-
-    # df = append_dates_with_nearest(df, "buy_date", buy_dates)
-
-    # buy_dates_df = pd.to_datetime(buy_dates)
-    # targets_df = pd.DataFrame({
-    #     "target_time": buy_dates_df,
-    #     "buy_date_to_set": buy_dates_df
-    # }).sort_values(by="target_time")
-
-    # df_timestamps = df[["timestamp"]].reset_index().sort_values(by="timestamp")
-    # merged_df = pd.merge_asof(
-    #     targets_df,
-    #     df_timestamps,
-    #     left_on="target_time",
-    #     right_on="timestamp",
-    #     direction="nearest",
-    # )
-    # df['buy_date'] = pd.NaT
-    # df.loc[merged_df["index"], "buy_date"] = merged_df["buy_date_to_set"].values
-
-    # # dfを過去14日分に制限
-    # latest_date = df['timestamp'].max()
-    # start_display_date = latest_date - timedelta(days=7)
-    # df = df[df['timestamp'] >= start_display_date]
-
-    # print(df)
+    # 2週間分に制限
+    latest_date = df['timestamp'].max()
+    start_display_date = latest_date - timedelta(days=7)
+    df = df[df['timestamp'] >= start_display_date]
 
     # データからグラフ作成
     fig, ax1 = plt.subplots(1, 1, figsize=(16, 9))
@@ -165,10 +139,49 @@ async def main() -> None:
         zorder=3
     )
 
-    # ロングした日時をグラフに反映
+    # ロングした日時をグラフに反映（画像マーカーを使用）
+    buy_signal_data = df.loc[df['buy_date'].notna()]
+    # if len(buy_signal_data) > 0:
+    #     # 使用する画像ファイルのパス（この例では購入アイコンのような画像を想定）
+    #     # 例: アイコンフォントやPNG画像を配置してください
+    #     image_path = Path(__file__).parent / "icon" / "hana_marker.webp"
+
+    #     # 画像が存在する場合は画像マーカーを使用、そうでなければ通常のマーカー
+    #     if image_path.exists():
+    #         # 画像を読み込み
+    #         img = plt.imread(image_path)
+
+    #         # 画像の横幅を基準にズーム値を自動調整
+    #         target_width_pixels = 100  # 目標の横幅（ピクセル）
+    #         img_width = img.shape[1]  # 画像の実際の横幅
+    #         zoom = target_width_pixels / img_width
+
+    #         imagebox = OffsetImage(img, zoom=zoom)  # 自動調整されたzoomを使用
+
+    #         for _, row in buy_signal_data.iterrows():
+    #             # 画像の位置調整（オフセット）
+    #             offset_x = -30  # X方向のオフセット（時間軸方向）
+    #             offset_y = -20  # Y方向のオフセット（価格軸方向）
+
+    #             ab = AnnotationBbox(
+    #                 imagebox,
+    #                 (row['timestamp'], row['close']),
+    #                 xybox=(offset_x, offset_y),  # オフセット指定
+    #                 xycoords='data',  # 基準座標系
+    #                 boxcoords='offset points',  # オフセットの単位（ポイント）
+    #                 frameon=False,
+    #                 pad=0
+    #             )
+    #             ax1.add_artist(ab)
+
+    #         # 凡例用のダミープロット（画像は凡例に表示されないため）
+    #         ax1.scatter([], [], color="#7CFF82", s=100, label='Buy Signal',
+    #                     marker='^', alpha=0.9)
+
+    # 通常のマーカーを使用
     ax1.scatter(
-        df.loc[df['buy_date'].notna(), 'timestamp'],
-        df.loc[df['buy_date'].notna(), 'close'],
+        buy_signal_data['timestamp'],
+        buy_signal_data['close'],
         color="#7CFF82",  # 落ち着いたグリーン
         s=100,
         label='Buy Signal',
@@ -178,6 +191,7 @@ async def main() -> None:
         linewidths=1.5,
         zorder=5
     )
+    # print(f"画像が見つかりません: {image_path}. 通常のマーカーを使用します。")
 
     # SARをドットで表示（トレンド転換で色を変更）
     sar_up_mask = ~pd.isna(df['sar_up'])
