@@ -24,7 +24,7 @@ class ActivityUpdaterCog(commands.Cog):
             logger.info("Updating bot activity with PnL information")
 
             # Get portfolio data
-            portfolio = self.exchange.get_spot_portfolio()
+            portfolio = await self.exchange.get_spot_portfolio_async()
             free_usdt = self.exchange.fetch_free_usdt()
 
             with TradeDataRepository() as repo:

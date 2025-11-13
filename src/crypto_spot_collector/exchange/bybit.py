@@ -3,6 +3,7 @@ from datetime import datetime
 from typing import Any
 
 import ccxt
+import ccxt.async_support as ccxt_async
 from loguru import logger
 
 from crypto_spot_collector.repository.trade_data_repository import TradeDataRepository
@@ -37,6 +38,12 @@ class BybitExchange():
             'apiKey': apiKey,
             "secret": secret
         })
+
+        self.exchange_async = ccxt_async.bybit({
+            'apiKey': apiKey,
+            "secret": secret
+        })
+
         self.repo_trade_data = TradeDataRepository()
         logger.info("Bybit exchange client initialized successfully")
 
@@ -44,6 +51,12 @@ class BybitExchange():
         logger.debug("Fetching account balance")
         balance = self.exchange.fetch_balance()
         logger.debug("Account balance fetched successfully")
+        return balance
+
+    async def fetch_balance_async(self) -> Any:
+        logger.debug("Fetching account balance asynchronously")
+        balance = await self.exchange_async.fetch_balance()
+        logger.debug("Account balance fetched successfully (async)")
         return balance
 
     def fetch_free_usdt(self) -> float:
@@ -438,6 +451,36 @@ class BybitExchange():
     def get_spot_portfolio(self) -> list[SpotAsset]:
         portfolio: list[SpotAsset] = []
         balance = self.fetch_balance()
+
+        for value in balance["info"]["result"]["list"]:
+            for coin in value["coin"]:
+                logger.debug(f"Processing coin: {coin['coin']}")
+                equity = float(coin["equity"])
+
+                pnl = 0.0
+                current_value = equity
+                if not coin["coin"] == "USDT":
+                    pnl = self.get_current_spot_pnl(coin["coin"])
+                    current_value = self.fetch_price(
+                        f"{coin['coin']}/USDT")["last"] * equity
+
+                spot_asset = SpotAsset(
+                    symbol=coin["coin"],
+                    total_amount=equity,
+                    current_value=current_value,
+                    profit_loss=pnl
+                )
+                portfolio.append(spot_asset)
+
+        # USDTを先頭に移動
+        portfolio.sort(key=lambda x: (x.symbol != "USDT", x.symbol))
+
+        logger.info("Spot portfolio fetched.")
+        return portfolio
+
+    async def get_spot_portfolio_async(self) -> list[SpotAsset]:
+        portfolio: list[SpotAsset] = []
+        balance = await self.fetch_balance_async()
 
         for value in balance["info"]["result"]["list"]:
             for coin in value["coin"]:
