@@ -18,6 +18,7 @@ from crypto_spot_collector.repository.trade_data_repository import TradeDataRepo
 from crypto_spot_collector.utils.dataframe import append_dates_with_nearest
 
 auto_complete_symbols = [symbol.upper() for symbol in spot_symbol]
+auto_complete_symbols.sort()
 
 
 class DetailBybitCog(commands.Cog):
@@ -110,7 +111,7 @@ def create_detail(symbol: str) -> BytesIO:
 
     # 表示範囲を最新データから7日間に制限（SARの計算前に実行）
     latest_date = df['timestamp'].max()
-    start_display_date = latest_date - timedelta(days=7)
+    start_display_date = latest_date - timedelta(days=14)
     df = df[df['timestamp'] >= start_display_date]
 
     # SAR計算（初期AF=0.02, 最大AF=0.2）
