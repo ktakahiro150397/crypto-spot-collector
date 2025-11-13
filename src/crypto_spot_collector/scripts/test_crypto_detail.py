@@ -70,7 +70,7 @@ async def main() -> None:
 
     with OHLCVRepository() as repo:
         data = repo.get_ohlcv_data(
-            symbol="BTC",
+            symbol="XRP",
             interval="1h",
             from_datetime=startDate,
             to_datetime=endDate
@@ -117,13 +117,19 @@ async def main() -> None:
         )
         buy_dates = [trade.timestamp_utc for trade in buy_trades]
 
-        print("Buy Dates:", buy_dates)
+        sell_trades: list[TradeData] = repo.get_closed_short_positions_date(
+            symbol="XRP",
+            start_date=startDate,
+            end_date=endDate
+        )
+        sell_dates = [trade.timestamp_utc for trade in sell_trades]
 
         df = append_dates_with_nearest(df, "buy_date", buy_dates)
+        df = append_dates_with_nearest(df, "sell_date", sell_dates)
 
     # 2週間分に制限
     latest_date = df['timestamp'].max()
-    start_display_date = latest_date - timedelta(days=7)
+    start_display_date = latest_date - timedelta(days=14)
     df = df[df['timestamp'] >= start_display_date]
 
     # データからグラフ作成
@@ -191,7 +197,20 @@ async def main() -> None:
         linewidths=1.5,
         zorder=5
     )
-    # print(f"画像が見つかりません: {image_path}. 通常のマーカーを使用します。")
+
+    sell_signal_data = df.loc[df['sell_date'].notna()]
+    ax1.scatter(
+        sell_signal_data['timestamp'],
+        sell_signal_data['close'],
+        color="#FF6E6E",  # ソフトなレッド
+        s=100,
+        label='Sell Signal',
+        marker='v',
+        alpha=0.9,
+        edgecolors='#C62828',
+        linewidths=1.5,
+        zorder=5
+    )
 
     # SARをドットで表示（トレンド転換で色を変更）
     sar_up_mask = ~pd.isna(df['sar_up'])
@@ -222,14 +241,14 @@ async def main() -> None:
         linewidths=1.2,
         zorder=4
     )
-    average_price = 106000
-    ax1.axhline(average_price, color='green', ls='--', lw=1,
-                alpha=0.7, label='Average Buy Price')
+    # average_price = 106000
+    # ax1.axhline(average_price, color='green', ls='--', lw=1,
+    #             alpha=0.7, label='Average Buy Price')
     # ax1.text(df['timestamp'].iloc[0], average_price,
     #          f" Average Buy : {average_price:.2f}",
     #          va="bottom", ha="left", fontsize=9)
 
-    limit_price = 110000
+    limit_price = 0
     if limit_price > 0:
         ax1.axhline(limit_price, color='green', ls="-", lw=1,
                     alpha=0.7, label='Limit Buy Price')

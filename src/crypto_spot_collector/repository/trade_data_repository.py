@@ -280,3 +280,39 @@ class TradeDataRepository:
         )
 
         return trades
+
+    def get_closed_short_positions_date(self, symbol: str, start_date: datetime, end_date: datetime) -> list[TradeData]:
+        """Get closed short positions for a given cryptocurrency symbol within a date range.
+
+        Args:
+            symbol: Symbol of the cryptocurrency (e.g., 'BTC').
+            start_date: Start date for filtering.
+            end_date: End date for filtering.
+        Returns:
+            List of TradeData records.
+        """
+
+        crypto = (
+            self.session.query(Cryptocurrency)
+            .filter(Cryptocurrency.symbol == symbol)
+            .one_or_none()
+        )
+        if not crypto:
+            return []
+
+        trades = (
+            self.session.query(TradeData)
+            .filter(
+                and_(
+                    TradeData.cryptocurrency_id == crypto.id,
+                    TradeData.status == "CLOSED",
+                    TradeData.position_type == "SHORT",
+                    TradeData.timestamp_utc >= start_date,
+                    TradeData.timestamp_utc <= end_date,
+                )
+            )
+            .order_by(TradeData.timestamp_utc)
+            .all()
+        )
+
+        return trades
