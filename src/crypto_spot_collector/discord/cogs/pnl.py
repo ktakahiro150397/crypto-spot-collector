@@ -115,6 +115,13 @@ class PnLBybitCog(commands.Cog):
             logger.error(f"Error in PnL command: {e}")
             await interaction.followup.send("An error occurred while generating the PnL statement.")
 
+    @app_commands.command(name="pnl_detail", description="Gets detailed profit and loss information.")
+    async def detail(self, interaction: discord.Interaction) -> None:
+        """Detailed PnL command - to be implemented"""
+        await interaction.response.defer()
+
+        await interaction.response.send_message("Detailed PnL command is under development.")
+
 
 async def setup(bot: commands.Bot) -> None:
     bybit_exchange = bot.bybit_exchange  # type: ignore

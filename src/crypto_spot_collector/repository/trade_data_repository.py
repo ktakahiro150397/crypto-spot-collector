@@ -244,3 +244,39 @@ class TradeDataRepository:
         """
         _, avg_price = self.get_current_position_and_avg_price(symbol)
         return avg_price
+
+    def get_closed_long_positions_date(self, symbol: str, start_date: datetime, end_date: datetime) -> list[TradeData]:
+        """Get closed long positions for a given cryptocurrency symbol within a date range.
+
+        Args:
+            symbol: Symbol of the cryptocurrency (e.g., 'BTC').
+            start_date: Start date for filtering.
+            end_date: End date for filtering.
+        Returns:
+            List of TradeData records.
+        """
+
+        crypto = (
+            self.session.query(Cryptocurrency)
+            .filter(Cryptocurrency.symbol == symbol)
+            .one_or_none()
+        )
+        if not crypto:
+            return []
+
+        trades = (
+            self.session.query(TradeData)
+            .filter(
+                and_(
+                    TradeData.cryptocurrency_id == crypto.id,
+                    TradeData.status == "CLOSED",
+                    TradeData.position_type == "LONG",
+                    TradeData.timestamp_utc >= start_date,
+                    TradeData.timestamp_utc <= end_date,
+                )
+            )
+            .order_by(TradeData.timestamp_utc)
+            .all()
+        )
+
+        return trades

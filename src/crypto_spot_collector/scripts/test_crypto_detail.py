@@ -15,6 +15,10 @@ from ta.trend import PSARIndicator
 
 from crypto_spot_collector.notification.discord import discordNotification
 from crypto_spot_collector.repository.ohlcv_repository import OHLCVRepository
+from crypto_spot_collector.repository.trade_data_repository import TradeDataRepository
+from crypto_spot_collector.utils.dataframe import append_dates_with_nearest
+
+# from ..models import TradeData
 
 # ライトテーマでいい感じのスタイルを設定
 sns.set_style("whitegrid")
@@ -60,50 +64,93 @@ webhook_url: str = (
 
 
 async def main() -> None:
-    """Main class for SAR calculation script."""
-    random.seed(1)
+    endDate = datetime(2025, 11, 14)
+    startDate = endDate - timedelta(days=21)
 
-    # テスト用のいい感じのクリプトデータを設定
-    df = pd.DataFrame()
-    random_data_start_date = datetime(2025, 10, 1)
-    random_data_end_date = datetime(2025, 10, 26)
-    date_range = pd.date_range(
-        start=random_data_start_date, end=random_data_end_date, freq='4H')
+    with OHLCVRepository() as repo:
+        data = repo.get_ohlcv_data(
+            symbol="BTC",
+            interval="1h",
+            from_datetime=startDate,
+            to_datetime=endDate
+        )
 
-    close_prices = []
-    for date in date_range:
-        close_prices.append(100000 * random.randint(1, 30) +
-                            (date - random_data_start_date).days * 500)
+        # データをDataFrameに変換
+        df = pd.DataFrame([
+            {
+                'timestamp': d.timestamp_utc + timedelta(hours=9),  # JSTに変換
+                'open': float(d.open_price),
+                'high': float(d.high_price),
+                'low': float(d.low_price),
+                'close': float(d.close_price),
+                'volume': float(d.volume)
+            }
+            for d in data
+        ])
+        # SMA50の計算
+        df["sma_50"] = df['close'].rolling(window=50).mean()
+        # SMA100の計算
+        df["sma_100"] = df['close'].rolling(window=100).mean()
 
-    buy_dates = []
-    for date in date_range:
-        buy_dates.append(random_data_end_date + timedelta(days=-1 * date.day))
+        # SAR計算（初期AF=0.02, 最大AF=0.2）
+        sar_indicator = PSARIndicator(
+            high=df['high'],
+            low=df['low'],
+            close=df['close'],
+            step=0.02,
+            max_step=0.2
+        )
 
-    df['timestamp'] = date_range
-    df['open'] = 100000.0
-    df['high'] = df['open'] + 2000
-    df['low'] = df['open'] - 2000
-    df['close'] = close_prices
-    df['volume'] = 100 + (pd.Series(range(len(date_range))) * 10).astype(float)
-    # SMA50の計算
-    df["sma_50"] = df['close'].rolling(window=50).mean()
-    # SMA100の計算
-    df["sma_100"] = df['close'].rolling(window=100).mean()
-    df["buy_date"] = buy_dates
+        df['sar'] = sar_indicator.psar()
+        df['sar_up'] = sar_indicator.psar_up()
+        df['sar_down'] = sar_indicator.psar_down()
 
-    # SAR計算（初期AF=0.02, 最大AF=0.2）
-    sar_indicator = PSARIndicator(
-        high=df['high'],
-        low=df['low'],
-        close=df['close'],
-        step=0.02,
-        max_step=0.2
-    )
-    df['sar'] = sar_indicator.psar()
-    df['sar_up'] = sar_indicator.psar_up()
-    df['sar_down'] = sar_indicator.psar_down()
+    df['timestamp'] = pd.to_datetime(df['timestamp'])
+    df = df.sort_values(by='timestamp')
 
-    print(df)
+    with TradeDataRepository() as repo:
+        buy_trades: list[TradeData] = repo.get_closed_long_positions_date(
+            symbol="BTC",
+            start_date=startDate,
+            end_date=endDate
+        )
+        buy_dates = [trade.timestamp_utc for trade in buy_trades]
+
+        print("Buy Dates:", buy_dates)
+
+        df = append_dates_with_nearest(df, "buy_date", buy_dates)
+
+    # buy_dates: list[datetime] = [
+    #     datetime(2025, 10, 26, 5, 10, 23),
+    #     datetime(2025, 10, 25, 7, 20, 48),
+    #     datetime(2025, 10, 25, 7, 12, 48),
+    # ]
+
+    # df = append_dates_with_nearest(df, "buy_date", buy_dates)
+
+    # buy_dates_df = pd.to_datetime(buy_dates)
+    # targets_df = pd.DataFrame({
+    #     "target_time": buy_dates_df,
+    #     "buy_date_to_set": buy_dates_df
+    # }).sort_values(by="target_time")
+
+    # df_timestamps = df[["timestamp"]].reset_index().sort_values(by="timestamp")
+    # merged_df = pd.merge_asof(
+    #     targets_df,
+    #     df_timestamps,
+    #     left_on="target_time",
+    #     right_on="timestamp",
+    #     direction="nearest",
+    # )
+    # df['buy_date'] = pd.NaT
+    # df.loc[merged_df["index"], "buy_date"] = merged_df["buy_date_to_set"].values
+
+    # # dfを過去14日分に制限
+    # latest_date = df['timestamp'].max()
+    # start_display_date = latest_date - timedelta(days=7)
+    # df = df[df['timestamp'] >= start_display_date]
+
+    # print(df)
 
     # データからグラフ作成
     fig, ax1 = plt.subplots(1, 1, figsize=(16, 9))
@@ -122,7 +169,7 @@ async def main() -> None:
     ax1.scatter(
         df.loc[df['buy_date'].notna(), 'timestamp'],
         df.loc[df['buy_date'].notna(), 'close'],
-        color='#43A047',  # 落ち着いたグリーン
+        color="#7CFF82",  # 落ち着いたグリーン
         s=100,
         label='Buy Signal',
         marker='^',
