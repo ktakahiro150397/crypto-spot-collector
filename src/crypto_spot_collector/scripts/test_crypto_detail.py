@@ -124,6 +124,8 @@ async def main() -> None:
         )
         sell_dates = [trade.timestamp_utc for trade in sell_trades]
 
+        average_price = repo.get_average_buy_price_by_symbol(symbol="XRP")
+
         df = append_dates_with_nearest(df, "buy_date", buy_dates)
         df = append_dates_with_nearest(df, "sell_date", sell_dates)
 
@@ -242,8 +244,8 @@ async def main() -> None:
         zorder=4
     )
     # average_price = 106000
-    # ax1.axhline(average_price, color='green', ls='--', lw=1,
-    #             alpha=0.7, label='Average Buy Price')
+    ax1.axhline(average_price, color='green', ls='--', lw=1,
+                alpha=0.7, label='Average Buy Price')
     # ax1.text(df['timestamp'].iloc[0], average_price,
     #          f" Average Buy : {average_price:.2f}",
     #          va="bottom", ha="left", fontsize=9)

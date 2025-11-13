@@ -83,6 +83,7 @@ async def main() -> None:
 
     # await bot.load_extension("crypto_spot_collector.discord.cogs.greet")
     await bot.load_extension("crypto_spot_collector.discord.cogs.pnl")
+    await bot.load_extension("crypto_spot_collector.discord.cogs.detail")
     await bot.load_extension("crypto_spot_collector.discord.cogs.activity_updater")
     await bot.start(BOT_TOKEN)
 

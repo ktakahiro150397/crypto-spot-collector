@@ -20,14 +20,8 @@ def append_dates_with_nearest(df: pd.DataFrame, column_name: str, dates: list[st
         direction="nearest"
     )
 
-    print("-------merged_df--------")
-    print(merged_df)
-
     # 元のdfに新しい列を追加
     df[column_name] = pd.NaT
     df.loc[merged_df["index"], column_name] = merged_df["value"].values
-
-    print("-------df--------")
-    print(df)
 
     return df

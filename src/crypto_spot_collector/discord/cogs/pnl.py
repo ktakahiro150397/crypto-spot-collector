@@ -17,7 +17,7 @@ class PnLBybitCog(commands.Cog):
         self.exchange = exchange
 
     @app_commands.command(name="pnl", description="Gets the profit and loss statement.")
-    async def greet(self, interaction: discord.Interaction) -> None:
+    async def pnl(self, interaction: discord.Interaction) -> None:
         try:
 
             await interaction.response.defer()  # 応答を遅延させる
@@ -114,13 +114,6 @@ class PnLBybitCog(commands.Cog):
         except Exception as e:
             logger.error(f"Error in PnL command: {e}")
             await interaction.followup.send("An error occurred while generating the PnL statement.")
-
-    @app_commands.command(name="pnl_detail", description="Gets detailed profit and loss information.")
-    async def detail(self, interaction: discord.Interaction) -> None:
-        """Detailed PnL command - to be implemented"""
-        await interaction.response.defer()
-
-        await interaction.response.send_message("Detailed PnL command is under development.")
 
 
 async def setup(bot: commands.Bot) -> None:
