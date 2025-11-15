@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any
+from types import TracebackType
+from typing import Any, Optional
 
 import ccxt
 import ccxt.async_support as ccxt_async
@@ -46,6 +47,35 @@ class BybitExchange():
 
         self.repo_trade_data = TradeDataRepository()
         logger.info("Bybit exchange client initialized successfully")
+
+    async def __aenter__(self) -> "BybitExchange":
+        """Async context manager entry"""
+        logger.debug("Entering BybitExchange async context")
+        return self
+
+    async def __aexit__(
+        self,
+        exc_type: Optional[type[BaseException]],
+        exc_val: Optional[BaseException],
+        exc_tb: Optional[TracebackType]
+    ) -> bool:
+        """Async context manager exit - automatically closes resources"""
+        logger.debug("Exiting BybitExchange async context")
+        await self.close()
+        return False
+
+    async def close(self) -> None:
+        """Explicitly close all exchange connections"""
+        logger.info("Closing Bybit exchange connections")
+        if hasattr(self, 'exchange_async') and self.exchange_async:
+            await self.exchange_async.close()
+            logger.debug("Async exchange connection closed")
+        if hasattr(self, 'exchange') and self.exchange:
+            # 同期版のexchangeもcloseメソッドがある場合はクローズ
+            if hasattr(self.exchange, 'close'):
+                self.exchange.close()
+                logger.debug("Sync exchange connection closed")
+        logger.info("All Bybit exchange connections closed successfully")
 
     def fetch_balance(self) -> Any:
         logger.debug("Fetching account balance")
@@ -177,7 +207,8 @@ class BybitExchange():
         logger.debug("Fetching currency data asynchronously")
         currency: dict[Any, Any] = await self.exchange_async.fetch_currencies()
         if currency:
-            logger.debug(f"Currency data fetched: {len(currency)} currencies (async)")
+            logger.debug(
+                f"Currency data fetched: {len(currency)} currencies (async)")
             return currency
         else:
             logger.error("Currency data not found")
@@ -429,7 +460,8 @@ class BybitExchange():
             raise
 
     async def fetch_average_buy_price_spot_async(self, symbol: str) -> float:
-        logger.debug(f"Fetching average buy price for {symbol} spot asynchronously")
+        logger.debug(
+            f"Fetching average buy price for {symbol} spot asynchronously")
         try:
             # 2025/01/01 以降の注文を取得(msで指定)
             since_ms = int(datetime(2025, 11, 1).timestamp() * 1000)
@@ -507,7 +539,8 @@ class BybitExchange():
             raise
 
     async def fetch_close_orders_all_async(self, symbol: str) -> list[dict[str, Any]]:
-        logger.debug(f"Fetching all closed orders for {symbol} spot asynchronously")
+        logger.debug(
+            f"Fetching all closed orders for {symbol} spot asynchronously")
         all_orders: list[dict[str, Any]] = []
         try:
             since_ms = int(datetime(2025, 11, 1).timestamp() * 1000)
@@ -591,7 +624,8 @@ class BybitExchange():
             raise
 
     async def fetch_open_orders_all_async(self, symbol: str) -> list[dict[str, Any]]:
-        logger.debug(f"Fetching all open orders for {symbol} spot asynchronously")
+        logger.debug(
+            f"Fetching all open orders for {symbol} spot asynchronously")
         all_orders: list[dict[str, Any]] = []
         try:
             since_ms = int(datetime(2025, 11, 1).timestamp() * 1000)
@@ -675,7 +709,8 @@ class BybitExchange():
             raise
 
     async def fetch_canceled_orders_all_async(self, symbol: str) -> list[dict[str, Any]]:
-        logger.debug(f"Fetching all canceled orders for {symbol} spot asynchronously")
+        logger.debug(
+            f"Fetching all canceled orders for {symbol} spot asynchronously")
         all_orders: list[dict[str, Any]] = []
         try:
             since_ms = int(datetime(2025, 11, 1).timestamp() * 1000)
