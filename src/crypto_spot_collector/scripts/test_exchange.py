@@ -19,11 +19,13 @@ async def main() -> None:
         secret=secrets["bybit"]["secret"]
     )
 
-    pnl = get_current_pnl_from_db(bybit_exchange, "LTC")
-    print(f"Current LTC PnL: {pnl:+.5f} USDT")
+    # pnl = get_current_pnl_from_db(bybit_exchange, "LTC")
+    # print(f"Current LTC PnL: {pnl:+.5f} USDT")
 
-    # average = bybit_exchange.fetch_average_buy_price_spot("LTC")
-    # print(f"ltc average buy price: {average}")
+    average = await bybit_exchange.fetch_average_buy_price_spot_async("LTC")
+    print(f"ltc average buy price: {average}")
+
+    await bybit_exchange.close()
 
     # ltc = bybit_exchange.get_current_spot_pnl("LTC")
     # print(f"ltc pnl: {ltc:+.5f} USDT")

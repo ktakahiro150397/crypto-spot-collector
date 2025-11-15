@@ -151,7 +151,7 @@ async def main() -> None:
         # 過去1日のOHLCVデータを取得して登録
         for symbol in spot_symbol:
             logger.debug(f"Processing {symbol.upper()}/USDT")
-            ohlcv = bybit_exchange.fetch_ohlcv(
+            ohlcv = await bybit_exchange.fetch_ohlcv_async(
                 symbol=f"{symbol.upper()}/USDT",
                 timeframe="1h",
                 fromDate=fromDateUtc,
@@ -197,11 +197,11 @@ async def main() -> None:
         logger.info("Updating trade data in database...")
 
         for symbol in spot_symbol:
-            closed_trades = bybit_exchange.fetch_close_orders_all(
+            closed_trades = await bybit_exchange.fetch_close_orders_all_async(
                 symbol=symbol.upper())
-            open_trades = bybit_exchange.fetch_open_orders_all(
+            open_trades = await bybit_exchange.fetch_open_orders_all_async(
                 symbol=symbol.upper())
-            canceled_trades = bybit_exchange.fetch_canceled_orders_all(
+            canceled_trades = await bybit_exchange.fetch_canceled_orders_all_async(
                 symbol=symbol.upper())
             create_update_trade_data(
                 symbol=symbol,
@@ -256,7 +256,7 @@ async def check_signal(
         logger.info(f"{symbol}: SAR buy signal detected! Placing order...")
         order_result = None
         try:
-            _, order_result = bybit_exchange.create_order_spot(
+            _, order_result = await bybit_exchange.create_order_spot_async(
                 amountByUSDT=amountByUSDT, symbol=symbol
             )
             logger.success(f"Successfully created spot order for {symbol}")
@@ -269,7 +269,7 @@ async def check_signal(
             return
 
         # Discord通知
-        free_usdt = bybit_exchange.fetch_free_usdt()
+        free_usdt = await bybit_exchange.fetch_free_usdt_async()
         # average_price = bybit_exchange.fetch_average_buy_price_spot(symbol)
         with TradeDataRepository() as repo:
             _, average_price = repo.get_current_position_and_avg_price(
