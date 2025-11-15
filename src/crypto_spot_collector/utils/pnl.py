@@ -42,6 +42,10 @@ async def create_pnl_plot(exchange: BybitExchange,
         asset.current_value = holdings * current_price
         asset.profit_loss = asset.current_value - \
             (holdings * avg_price)
+        # ROI calculation: (current_value - cost) / cost * 100
+        cost = holdings * avg_price
+        asset.roi_percent = (asset.profit_loss / cost *
+                             100) if cost != 0 else 0
 
     if len(portfolio) == 0:
         raise ValueError("No assets in the portfolio.")
@@ -49,8 +53,13 @@ async def create_pnl_plot(exchange: BybitExchange,
     logger.debug("Generating PnL statement chart")
 
     # サブプロットの作成
-    rows = len(portfolio) // 2 + (len(portfolio) % 2)
-    fig, axes = plt.subplots(rows + 1, 2, figsize=(24, 8 * rows + 10))
+    column_count = 3
+    non_usdt_count = len([e for e in portfolio if e.symbol != "USDT"])
+    # +1 for the first row
+    rows = non_usdt_count // column_count + \
+        (non_usdt_count % column_count > 0) + 1
+    fig, axes = plt.subplots(rows, column_count,
+                             figsize=(12 * column_count, 8 * rows + 10))
     fig.suptitle('Cryptocurrency Portfolio Analysis', fontsize=16, y=0.995)
 
     df = pd.DataFrame(
@@ -60,18 +69,24 @@ async def create_pnl_plot(exchange: BybitExchange,
                 "Total_Amount": asset.total_amount,
                 "Current_Value": asset.current_value,
                 "PnL": asset.profit_loss,
+                "ROI%": asset.roi_percent,
+                "Investment": asset.total_amount * tradeRepo.get_current_position_and_avg_price(asset.symbol)[1],
             }
             for asset in portfolio if asset.symbol != "USDT"
         ]
     )
     total_current_value = df['Current_Value'].sum()
     total_pnl = df['PnL'].sum()
+    total_investment = df['Investment'].sum()
     total_pnl_percent = (total_pnl / (total_current_value - total_pnl)) * \
         100 if (total_current_value - total_pnl) != 0 else 0
     result.total_current_value = total_current_value
     result.total_pnl = total_pnl
     result.total_pnl_percent = total_pnl_percent
     result.df = df
+
+    logger.debug(
+        f"Total Investment: {total_investment}, Total Current Value: {total_current_value}, Total PnL: {total_pnl}({total_pnl_percent:+.2f}%)")
 
     logger.debug(
         f"Total Current Value: {total_current_value}, Total PnL: {total_pnl}({total_pnl_percent:+.2f}%)")
@@ -90,6 +105,36 @@ async def create_pnl_plot(exchange: BybitExchange,
     axes[0, 1].tick_params(axis='x', rotation=45)
     axes[0, 1].axhline(y=0, color='black', linestyle='-', alpha=0.3)
 
+    # 3. 投資額 vs 現在価値の比較（グループ化棒グラフ）
+    import numpy as np
+    x = np.arange(len(df['Symbol']))
+    width = 0.35
+
+    bars1 = axes[0, 2].bar(x - width/2, df['Investment'], width,
+                           label='Investment', color='#FFA726', alpha=0.8)
+    bars2 = axes[0, 2].bar(x + width/2, df['Current_Value'], width,
+                           label='Current Value', color='#42A5F5', alpha=0.8)
+
+    axes[0, 2].set_title('Investment vs Current Value by Asset')
+    axes[0, 2].set_ylabel('Amount (USDT)')
+    axes[0, 2].set_xlabel('Asset')
+    axes[0, 2].set_xticks(x)
+    axes[0, 2].set_xticklabels(df['Symbol'], rotation=45)
+    axes[0, 2].legend(loc='upper left')
+    axes[0, 2].grid(True, alpha=0.3, axis='y')
+
+    # 各バーの上に数値表示
+    for bar in bars1:
+        height = bar.get_height()
+        axes[0, 2].text(bar.get_x() + bar.get_width()/2., height,
+                        f'{height:.1f}',
+                        ha='center', va='bottom', fontsize=8)
+    for bar in bars2:
+        height = bar.get_height()
+        axes[0, 2].text(bar.get_x() + bar.get_width()/2., height,
+                        f'{height:.1f}',
+                        ha='center', va='bottom', fontsize=8)
+
     # ---- 2行目以降 ----
     timeframe = "1h"
     endDate = datetime.now(timezone.utc)
@@ -99,8 +144,9 @@ async def create_pnl_plot(exchange: BybitExchange,
     for i, asset in enumerate(non_usdt_assets):
         symbol = asset.symbol
 
-        row_idx = (i + 2) // 2
-        col_idx = (i + 2) % 2
+        # 2行目以降のインデックス計算 (1行目は別用途)
+        row_idx = (i // column_count) + 1
+        col_idx = i % column_count
 
         set_symbol_plot(
             tradeRepo=tradeRepo,
@@ -111,11 +157,14 @@ async def create_pnl_plot(exchange: BybitExchange,
             axe=axes[row_idx, col_idx]
         )
 
-    # 空白のサブプロットを非表示にする
+    # 2行目以降の空白のサブプロットを非表示にする
     total_plots = len(non_usdt_assets)
-    if total_plots % 2 == 1:  # 奇数個の場合、最後の空白を非表示
-        last_row = (total_plots + 2 - 1) // 2
-        axes[last_row, 1].axis('off')
+    last_row = (total_plots // column_count) + 1
+    filled_in_last_row = total_plots % column_count
+
+    if filled_in_last_row > 0:
+        for col in range(filled_in_last_row, column_count):
+            axes[last_row, col].axis('off')
 
     # グラフ間の余白を調整
     plt.tight_layout(rect=(0, 0, 1, 0.99), h_pad=4.0, w_pad=3.0)
