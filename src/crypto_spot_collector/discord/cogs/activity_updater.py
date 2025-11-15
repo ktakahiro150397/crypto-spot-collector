@@ -25,7 +25,7 @@ class ActivityUpdaterCog(commands.Cog):
 
             # Get portfolio data
             portfolio = await self.exchange.get_spot_portfolio_async()
-            free_usdt = self.exchange.fetch_free_usdt()
+            free_usdt = await self.exchange.fetch_free_usdt_async()
 
             with TradeDataRepository() as repo:
                 for asset in portfolio:
@@ -35,8 +35,8 @@ class ActivityUpdaterCog(commands.Cog):
                     current_price = 1.0
                     if asset.symbol != "USDT":
                         current_price = float(
-                            self.exchange.fetch_price(
-                                f"{asset.symbol}/USDT")["last"]
+                            (await self.exchange.fetch_price_async(
+                                f"{asset.symbol}/USDT"))["last"]
                         )
                     asset.total_amount = holdings
                     asset.current_value = holdings * current_price

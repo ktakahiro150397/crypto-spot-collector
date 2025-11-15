@@ -22,7 +22,7 @@ class PnLBybitCog(commands.Cog):
 
             await interaction.response.defer()  # 応答を遅延させる
 
-            portfolio = self.exchange.get_spot_portfolio()
+            portfolio = await self.exchange.get_spot_portfolio_async()
             with TradeDataRepository() as repo:
                 for asset in portfolio:
                     holdings, avg_price = repo.get_current_position_and_avg_price(
@@ -31,8 +31,8 @@ class PnLBybitCog(commands.Cog):
                     current_price = 1.0
                     if asset.symbol != "USDT":
                         current_price = float(
-                            self.exchange.fetch_price(
-                                f"{asset.symbol}/USDT")["last"]
+                            (await self.exchange.fetch_price_async(
+                                f"{asset.symbol}/USDT"))["last"]
                         )
                     asset.total_amount = holdings
                     asset.current_value = holdings * current_price
@@ -91,7 +91,7 @@ class PnLBybitCog(commands.Cog):
                             dpi=150, bbox_inches="tight")
                 img_buffer1.seek(0)
 
-                free_usdt = self.exchange.fetch_free_usdt()
+                free_usdt = await self.exchange.fetch_free_usdt_async()
                 embed = discord.Embed(
                     title="PnL Statement",
                     color=0x00ff00 if total_pnl >= 0 else 0xff0000,
