@@ -54,17 +54,21 @@ class OHLCVData(Base):
     open_price: Column[DECIMAL] = Column(
         DECIMAL(20, 8), nullable=False, comment="オープン価格"
     )
-    high_price: Column[DECIMAL] = Column(DECIMAL(20, 8), nullable=False, comment="高値")
-    low_price: Column[DECIMAL] = Column(DECIMAL(20, 8), nullable=False, comment="安値")
+    high_price: Column[DECIMAL] = Column(
+        DECIMAL(20, 8), nullable=False, comment="高値")
+    low_price: Column[DECIMAL] = Column(
+        DECIMAL(20, 8), nullable=False, comment="安値")
     close_price: Column[DECIMAL] = Column(
         DECIMAL(20, 8), nullable=False, comment="クローズ価格"
     )
-    volume: Column[DECIMAL] = Column(DECIMAL(20, 8), nullable=False, comment="取引量")
+    volume: Column[DECIMAL] = Column(
+        DECIMAL(20, 8), nullable=False, comment="取引量")
     timestamp_utc = Column(TIMESTAMP, nullable=False, comment="データ時刻（UTC）")
     created_at = Column(TIMESTAMP, server_default=func.current_timestamp())
 
     # Relationships
-    cryptocurrency = relationship("Cryptocurrency", back_populates="ohlcv_data")
+    cryptocurrency = relationship(
+        "Cryptocurrency", back_populates="ohlcv_data")
 
     # Indexes and constraints
     __table_args__ = (
@@ -92,29 +96,42 @@ class TradeData(Base):
     cryptocurrency_id = Column(
         Integer, ForeignKey("cryptocurrencies.id"), nullable=False
     )
-    exchange_name = Column(String(50), nullable=False, comment="取引所名")
+    exchange_name = Column(String(50), nullable=False, comment="Exchange name")
+    trade_id = Column(String(100), nullable=False,
+                      comment="Unique trade identifier from the exchange")
+    status: Column[Enum] = Column(
+        Enum("OPEN", "CANCELED", "CLOSED", name="status_enum"),
+        nullable=False,
+        comment="Trade status",
+    )
     position_type: Column[Enum] = Column(
         Enum("LONG", "SHORT", name="position_type_enum"),
         nullable=False,
-        comment="ロング/ショート",
+        comment="Long or Short",
     )
     is_spot = Column(
         Boolean,
         nullable=False,
-        comment="現物かどうか（TRUE: 現物, FALSE: 先物/デリバティブ）",
+        comment="Is spot trade (TRUE) or margin/futures trade (FALSE)",
     )
     leverage_ratio: Column[DECIMAL] = Column(
-        DECIMAL(5, 2), default=1.00, comment="レバレッジ倍率（現物の場合は1.00）"
+        DECIMAL(5, 2), default=1.00, comment="Leverage ratio (1.00 for spot trades)"
     )
-    price: Column[DECIMAL] = Column(DECIMAL(20, 8), nullable=False, comment="取引価格")
+    price: Column[DECIMAL] = Column(
+        DECIMAL(20, 8), nullable=False, comment="price at which the trade was executed")
     quantity: Column[DECIMAL] = Column(
-        DECIMAL(20, 8), nullable=False, comment="取引数量"
+        DECIMAL(20, 8), nullable=False, comment="quantity traded"
     )
-    timestamp_utc = Column(TIMESTAMP, nullable=False, comment="取引時刻（UTC）")
+    fee: Column[DECIMAL] = Column(
+        DECIMAL(20, 8), nullable=False, comment="transaction fee (if any / as USDT)"
+    )
+    timestamp_utc = Column(TIMESTAMP, nullable=True,
+                           comment="trade execution time (UTC)")
     created_at = Column(TIMESTAMP, server_default=func.current_timestamp())
 
     # Relationships
-    cryptocurrency = relationship("Cryptocurrency", back_populates="trade_data")
+    cryptocurrency = relationship(
+        "Cryptocurrency", back_populates="trade_data")
 
     # Indexes
     __table_args__ = (
@@ -133,6 +150,7 @@ class TradeData(Base):
     def __repr__(self) -> str:
         return (
             f"<TradeData(cryptocurrency_id={self.cryptocurrency_id}, "
-            f"exchange='{self.exchange_name}', position='{self.position_type}', "
+            f"exchange='{self.exchange_name}', trade_id='{self.trade_id}', "
+            f"status='{self.status}', position='{self.position_type}', "
             f"price={self.price}, timestamp_utc={self.timestamp_utc})>"
         )

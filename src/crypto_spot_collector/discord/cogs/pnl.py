@@ -8,6 +8,7 @@ from loguru import logger
 from matplotlib import pyplot as plt
 
 from crypto_spot_collector.exchange.bybit import BybitExchange
+from crypto_spot_collector.repository.trade_data_repository import TradeDataRepository
 
 
 class PnLBybitCog(commands.Cog):
@@ -16,12 +17,28 @@ class PnLBybitCog(commands.Cog):
         self.exchange = exchange
 
     @app_commands.command(name="pnl", description="Gets the profit and loss statement.")
-    async def greet(self, interaction: discord.Interaction) -> None:
+    async def pnl(self, interaction: discord.Interaction) -> None:
         try:
 
             await interaction.response.defer()  # 応答を遅延させる
 
             portfolio = self.exchange.get_spot_portfolio()
+            with TradeDataRepository() as repo:
+                for asset in portfolio:
+                    holdings, avg_price = repo.get_current_position_and_avg_price(
+                        symbol=asset.symbol
+                    )
+                    current_price = 1.0
+                    if asset.symbol != "USDT":
+                        current_price = float(
+                            self.exchange.fetch_price(
+                                f"{asset.symbol}/USDT")["last"]
+                        )
+                    asset.total_amount = holdings
+                    asset.current_value = holdings * current_price
+                    asset.profit_loss = asset.current_value - \
+                        (holdings * avg_price)
+
             if len(portfolio) == 0:
                 await interaction.followup.send("No assets in the portfolio.")
             else:

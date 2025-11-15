@@ -33,13 +33,16 @@ CREATE TABLE IF NOT EXISTS ohlcv_data (
 CREATE TABLE IF NOT EXISTS trade_data (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
     cryptocurrency_id INT NOT NULL,
-    exchange_name VARCHAR(50) NOT NULL COMMENT '取引所名',
-    position_type ENUM('LONG', 'SHORT') NOT NULL COMMENT 'ロング/ショート',
-    is_spot BOOLEAN NOT NULL COMMENT '現物かどうか（TRUE: 現物, FALSE: 先物/デリバティブ）',
-    leverage_ratio DECIMAL(5, 2) DEFAULT 1.00 COMMENT 'レバレッジ倍率（現物の場合は1.00）',
-    price DECIMAL(20, 8) NOT NULL COMMENT '取引価格',
-    quantity DECIMAL(20, 8) NOT NULL COMMENT '取引数量',
-    timestamp_utc TIMESTAMP NOT NULL COMMENT '取引時刻（UTC）',
+    exchange_name VARCHAR(50) NOT NULL COMMENT 'Exchange name',
+    trade_id VARCHAR(100) NOT NULL COMMENT 'Unique trade identifier from the exchange',
+    status ENUM('OPEN', 'CANCELED', 'CLOSED') NOT NULL COMMENT 'Trade status',
+    position_type ENUM('LONG', 'SHORT') NOT NULL COMMENT 'Long or Short',
+    is_spot BOOLEAN NOT NULL COMMENT 'Is spot trade (TRUE) or margin/futures trade (FALSE)',
+    leverage_ratio DECIMAL(5, 2) DEFAULT 1.00 COMMENT 'Leverage ratio (1.00 for spot trades)',
+    price DECIMAL(20, 10) NOT NULL COMMENT 'price at which the trade was executed',
+    quantity DECIMAL(20, 10) NOT NULL COMMENT 'quantity traded',
+    fee DECIMAL(20, 10) NOT NULL COMMENT 'transaction fee (if any / as USDT)',
+    timestamp_utc TIMESTAMP NULL COMMENT 'trade execution time (UTC)',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (cryptocurrency_id) REFERENCES cryptocurrencies(id),
     INDEX idx_crypto_exchange_time (cryptocurrency_id, exchange_name, timestamp_utc),
@@ -47,10 +50,10 @@ CREATE TABLE IF NOT EXISTS trade_data (
     INDEX idx_exchange_name (exchange_name),
     INDEX idx_position_type (position_type),
     INDEX idx_is_spot (is_spot)
-) COMMENT='取引データテーブル';
+) COMMENT='Trade data table';
 
 -- 初期データの投入
-INSERT IGNORE INTO cryptocurrencies (symbol, name) VALUES 
+INSERT IGNORE INTO cryptocurrencies (symbol, name) VALUES
 ('BTC', 'Bitcoin'),
 ('ETH', 'Ethereum'),
 ('BNB', 'Binance Coin'),
