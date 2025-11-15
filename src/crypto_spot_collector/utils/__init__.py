@@ -1,9 +1,11 @@
 """Crypto Spot Collector main module."""
 
 from .dataframe import append_dates_with_nearest
+from .pnl import CreatePnlResult, create_pnl_plot
 from .secrets import load_config, load_secrets, load_settings
 from .trade_data import create_update_trade_data
 
 __version__ = "0.1.0"
 __all__ = ["load_secrets", "load_settings",
-           "load_config", "create_update_trade_data", "append_dates_with_nearest"]
+           "load_config", "create_update_trade_data", "append_dates_with_nearest",
+           "CreatePnlResult", "create_pnl_plot"]
