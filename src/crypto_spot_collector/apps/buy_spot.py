@@ -43,7 +43,7 @@ logger.add(
 logger.add(
     sink=log_file,
     format="{time:YYYY-MM-DD HH:mm:ss} | {level: <8} | {name}:{function}:{line} - {message}",
-    level="DEBUG",
+    level="INFO",
     rotation="00:00",  # 毎日0時にローテーション
     retention="30 days",  # 30日間保持
     compression="zip",  # 古いログファイルをzip圧縮
