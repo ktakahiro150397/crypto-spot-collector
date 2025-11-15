@@ -5,10 +5,10 @@ import pandas as pd
 from discord import app_commands
 from discord.ext import commands
 from loguru import logger
-from matplotlib import pyplot as plt
 
 from crypto_spot_collector.exchange.bybit import BybitExchange
 from crypto_spot_collector.repository.trade_data_repository import TradeDataRepository
+from crypto_spot_collector.utils.pnl import create_pnl_plot
 
 
 class PnLBybitCog(commands.Cog):
@@ -22,82 +22,19 @@ class PnLBybitCog(commands.Cog):
 
             await interaction.response.defer()  # 応答を遅延させる
 
-            portfolio = await self.exchange.get_spot_portfolio_async()
-            with TradeDataRepository() as repo:
-                for asset in portfolio:
-                    holdings, avg_price = repo.get_current_position_and_avg_price(
-                        symbol=asset.symbol
-                    )
-                    current_price = 1.0
-                    if asset.symbol != "USDT":
-                        current_price = float(
-                            (await self.exchange.fetch_price_async(
-                                f"{asset.symbol}/USDT"))["last"]
-                        )
-                    asset.total_amount = holdings
-                    asset.current_value = holdings * current_price
-                    asset.profit_loss = asset.current_value - \
-                        (holdings * avg_price)
-
-            if len(portfolio) == 0:
-                await interaction.followup.send("No assets in the portfolio.")
-            else:
-
-                logger.debug("Generating PnL statement chart")
-                df = pd.DataFrame(
-                    [
-                        {
-                            "Symbol": asset.symbol,
-                            "Total_Amount": asset.total_amount,
-                            "Current_Value": asset.current_value,
-                            "PnL": asset.profit_loss,
-                        }
-                        for asset in portfolio if asset.symbol != "USDT"
-                    ]
+            with TradeDataRepository() as tradeRepo:
+                result = await create_pnl_plot(
+                    exchange=self.exchange,
+                    tradeRepo=tradeRepo
                 )
-                total_current_value = df['Current_Value'].sum()
-                total_pnl = df['PnL'].sum()
-                total_pnl_percent = (total_pnl / (total_current_value - total_pnl)) * \
-                    100 if (total_current_value - total_pnl) != 0 else 0
-                logger.debug(
-                    f"Total Current Value: {total_current_value}, Total PnL: {total_pnl}({total_pnl_percent:+.2f}%)")
-
-                # サブプロットの作成
-                fig, axes = plt.subplots(1, 2, figsize=(15, 6))
-                fig.suptitle('Cryptocurrency Portfolio Analysis', fontsize=16)
-
-                # 1. 現在価値の円グラフ(シンボルごと)
-                axes[0].pie(df['Current_Value'], labels=df['Symbol'],
-                            autopct='%1.1f%%', startangle=140)
-                axes[0].set_title('Current Value Distribution by Asset')
-                # axes[0].bar(df['Symbol'], df['Current_Value'])
-                # axes[0].set_title('Current Value by Asset')
-                # axes[0].set_ylabel('Value (USDT)')
-                # axes[0].tick_params(axis='x', rotation=45)
-
-                # 2. PnLの棒グラフ（正負で色分け）
-                colors = ['green' if x >= 0 else 'red' for x in df['PnL']]
-                axes[1].bar(df['Symbol'], df['PnL'], color=colors)
-                axes[1].set_title('Profit & Loss by Asset')
-                axes[1].set_ylabel('PnL (USDT)')
-                axes[1].tick_params(axis='x', rotation=45)
-                axes[1].axhline(y=0, color='black', linestyle='-', alpha=0.3)
-
-                plt.tight_layout()
-
-                # 画像をメモリ上に保存
-                img_buffer1 = BytesIO()
-                plt.savefig(img_buffer1, format="png",
-                            dpi=150, bbox_inches="tight")
-                img_buffer1.seek(0)
 
                 free_usdt = await self.exchange.fetch_free_usdt_async()
                 embed = discord.Embed(
                     title="PnL Statement",
-                    color=0x00ff00 if total_pnl >= 0 else 0xff0000,
+                    color=0x00ff00 if result.total_pnl >= 0 else 0xff0000,
                     timestamp=interaction.created_at
                 )
-                for _, row in df.iterrows():
+                for _, row in result.df.iterrows():
                     symbol = row['Symbol']
                     pnl = row['PnL']
                     pnl_percent = (pnl / (row['Current_Value'] - pnl)
@@ -108,8 +45,8 @@ class PnLBybitCog(commands.Cog):
                         inline=True
                     )
 
-                message = f"Total Portfolio Value: {total_current_value:.2f} USDT\nTotal PnL: {total_pnl:+.2f} USDT({total_pnl_percent:+.2f}%)\nFree USDT: {free_usdt:.2f} USDT"
-                await interaction.followup.send(message, embed=embed, file=discord.File(img_buffer1, "pnl_statement.png"))
+                message = f"Total Portfolio Value: {result.total_current_value:.2f} USDT\nTotal PnL: {result.total_pnl:+.2f} USDT({result.total_pnl_percent:+.2f}%)\nFree USDT: {free_usdt:.2f} USDT"
+                await interaction.followup.send(message, embed=embed, file=discord.File(result.img_buffer, "pnl_statement.png"))
                 logger.info("PnL statement sent successfully")
         except Exception as e:
             logger.error(f"Error in PnL command: {e}")
