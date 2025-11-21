@@ -16,6 +16,7 @@ from crypto_spot_collector.exchange.bybit import BybitExchange
 from crypto_spot_collector.notification.discord import discordNotification
 from crypto_spot_collector.providers.market_data_provider import MarketDataProvider
 from crypto_spot_collector.repository.trade_data_repository import TradeDataRepository
+from crypto_spot_collector.utils.dataframe import append_dates_with_nearest
 from crypto_spot_collector.utils.secrets import load_config
 from crypto_spot_collector.utils.trade_data import create_update_trade_data
 
@@ -36,7 +37,7 @@ logger.add(
     sink=sys.stdout,
     format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> | <cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> - <level>{message}</level>",
     level="INFO",
-    colorize=True
+    colorize=True,
 )
 
 # ファイルにログを保存（DEBUGレベル以上、日次ローテーション）
@@ -47,7 +48,7 @@ logger.add(
     rotation="00:00",  # 毎日0時にローテーション
     retention="30 days",  # 30日間保持
     compression="zip",  # 古いログファイルをzip圧縮
-    encoding="utf-8"
+    encoding="utf-8",
 )
 
 # --- seaborn 設定 ---
@@ -58,42 +59,55 @@ sns.set_palette("husl")
 # カスタムTTFフォントを使用する設定
 # 使い方: fontsフォルダにTTFファイルを配置して、ファイル名を指定
 # 例: "fonts/Inter-Regular.ttf" or "fonts/Roboto-Regular.ttf"
-CUSTOM_FONT_PATH = Path(
-    __file__).parent / "font" / "CourierPrime-Regular.ttf"
+CUSTOM_FONT_PATH = Path(__file__).parent / "font" / "CourierPrime-Regular.ttf"
 
 if CUSTOM_FONT_PATH and Path(CUSTOM_FONT_PATH).exists():
     # TTFファイルを登録
     font_manager.fontManager.addfont(CUSTOM_FONT_PATH)
     custom_font = font_manager.FontProperties(fname=CUSTOM_FONT_PATH)
-    plt.rcParams['font.family'] = custom_font.get_name()
+    plt.rcParams["font.family"] = custom_font.get_name()
     print(f"カスタムフォントを使用: {custom_font.get_name()}")
 else:
     # デフォルトフォント（システムフォント）
-    plt.rcParams['font.family'] = 'sans-serif'
-    plt.rcParams['font.sans-serif'] = ['Arial', 'Helvetica', 'DejaVu Sans']
+    plt.rcParams["font.family"] = "sans-serif"
+    plt.rcParams["font.sans-serif"] = ["Arial", "Helvetica", "DejaVu Sans"]
     if CUSTOM_FONT_PATH:
-        print(f"警告: {CUSTOM_FONT_PATH} が見つかりません。デフォルトフォントを使用します。")
+        print(
+            f"警告: {CUSTOM_FONT_PATH} が見つかりません。デフォルトフォントを使用します。"
+        )
 
-plt.rcParams['font.size'] = 11
+plt.rcParams["font.size"] = 11
 
 # ライトテーマの配色
-plt.rcParams['figure.facecolor'] = '#FFFFFF'
-plt.rcParams['axes.facecolor'] = '#F8F9FA'
-plt.rcParams['axes.edgecolor'] = '#CCCCCC'
-plt.rcParams['grid.color'] = '#E0E0E0'
-plt.rcParams['grid.linestyle'] = '--'
-plt.rcParams['grid.linewidth'] = 0.8
-plt.rcParams['text.color'] = '#2C3E50'
-plt.rcParams['axes.labelcolor'] = '#2C3E50'
-plt.rcParams['xtick.color'] = '#2C3E50'
-plt.rcParams['ytick.color'] = '#2C3E50'
+plt.rcParams["figure.facecolor"] = "#FFFFFF"
+plt.rcParams["axes.facecolor"] = "#F8F9FA"
+plt.rcParams["axes.edgecolor"] = "#CCCCCC"
+plt.rcParams["grid.color"] = "#E0E0E0"
+plt.rcParams["grid.linestyle"] = "--"
+plt.rcParams["grid.linewidth"] = 0.8
+plt.rcParams["text.color"] = "#2C3E50"
+plt.rcParams["axes.labelcolor"] = "#2C3E50"
+plt.rcParams["xtick.color"] = "#2C3E50"
+plt.rcParams["ytick.color"] = "#2C3E50"
 
 # -------
 
 
-spot_symbol = ["btc", "eth", "xrp", "sol", "link",
-               "avax", "hype", "bnb", "doge", "wld", "ltc", "pol",
-               "xaut",]
+spot_symbol = [
+    "btc",
+    "eth",
+    "xrp",
+    "sol",
+    "link",
+    "avax",
+    "hype",
+    "bnb",
+    "doge",
+    "wld",
+    "ltc",
+    "pol",
+    "xaut",
+]
 
 logger.info("Initializing crypto spot collector script")
 secret_file = Path(__file__).parent / "secrets.json"
@@ -115,8 +129,7 @@ async def main() -> None:
     logger.info("Starting buy spot script")
 
     logger.info("---- Settings ----")
-    logger.info(
-        f"Discord Webhook URL: {secrets['discord']['discordWebhookUrl']}")
+    logger.info(f"Discord Webhook URL: {secrets['discord']['discordWebhookUrl']}")
     logger.info(f"Spot Symbols: {spot_symbol}")
     for setting in secrets["settings"]["timeframes"]:
         logger.info("------------------")
@@ -133,11 +146,11 @@ async def main() -> None:
         # 次の1時間まで待機処理
         now = datetime.now(timezone.utc)
         logger.info(f"Current time: {now}")
-        next_run = (now + timedelta(hours=1)).replace(minute=0,
-                                                      second=0, microsecond=0)
+        next_run = (now + timedelta(hours=1)).replace(minute=0, second=0, microsecond=0)
         wait_seconds = (next_run - now).total_seconds()
         logger.info(
-            f"Waiting for {wait_seconds} seconds until next run at {next_run} UTC")
+            f"Waiting for {wait_seconds} seconds until next run at {next_run} UTC"
+        )
         await asyncio.sleep(wait_seconds)
 
         # 時間足の取得・登録
@@ -168,8 +181,9 @@ async def main() -> None:
             amountByUSDT = setting["amountBuyUSDT"]
             consecutivePositiveCount = setting["consecutivePositiveCount"]
 
-            timeframe_delta = int(timeframe.replace(
-                "m", "").replace("h", "").replace("d", ""))
+            timeframe_delta = int(
+                timeframe.replace("m", "").replace("h", "").replace("d", "")
+            )
 
             # 現時刻が時間足の区切り目であればシグナルチェックを実行
             toJst = toDateUtc.astimezone(timezone(timedelta(hours=9)))
@@ -186,7 +200,7 @@ async def main() -> None:
                         symbol=symbol.upper(),
                         timeframe=timeframe,
                         amountByUSDT=amountByUSDT,
-                        consecutivePositiveCount=consecutivePositiveCount
+                        consecutivePositiveCount=consecutivePositiveCount,
                     )
             else:
                 logger.info(
@@ -198,16 +212,19 @@ async def main() -> None:
 
         for symbol in spot_symbol:
             closed_trades = await bybit_exchange.fetch_close_orders_all_async(
-                symbol=symbol.upper())
+                symbol=symbol.upper()
+            )
             open_trades = await bybit_exchange.fetch_open_orders_all_async(
-                symbol=symbol.upper())
+                symbol=symbol.upper()
+            )
             canceled_trades = await bybit_exchange.fetch_canceled_orders_all_async(
-                symbol=symbol.upper())
+                symbol=symbol.upper()
+            )
             create_update_trade_data(
                 symbol=symbol,
                 open_trades=open_trades,
                 closed_trades=closed_trades,
-                canceled_trades=canceled_trades
+                canceled_trades=canceled_trades,
             )
 
         # if toJst.hour == 0:
@@ -221,7 +238,7 @@ async def check_signal(
     symbol: str,
     timeframe: str,
     amountByUSDT: float,
-    consecutivePositiveCount: int
+    consecutivePositiveCount: int,
 ) -> None:
     """Check for SAR buy/sell signals and send Discord notification if detected."""
 
@@ -235,7 +252,7 @@ async def check_signal(
         from_datetime=startDate,
         to_datetime=endDate,
         sma_windows=[50, 100],
-        sar_config={"step": 0.02, "max_step": 0.2}
+        sar_config={"step": 0.02, "max_step": 0.2},
     )
 
     logger.debug(f"Retrieved {len(df)} OHLCV records for {symbol}")
@@ -245,8 +262,7 @@ async def check_signal(
         return
 
     # Use SARChecker to check for buy signal
-    sar_checker = SARChecker(
-        consecutive_positive_count=consecutivePositiveCount)
+    sar_checker = SARChecker(consecutive_positive_count=consecutivePositiveCount)
     sar_up_signal = sar_checker.check(df)
     logger.info(f"{symbol}: SAR Up Signal: {sar_up_signal}")
 
@@ -263,8 +279,7 @@ async def check_signal(
         except Exception as e:
             logger.error(f"Error creating spot order for {symbol}: {e}")
             await notificator.send_notification_async(
-                message=f"Error creating spot order for {symbol}: {e}",
-                files=[]
+                message=f"Error creating spot order for {symbol}: {e}", files=[]
             )
             return
 
@@ -272,9 +287,7 @@ async def check_signal(
         free_usdt = await bybit_exchange.fetch_free_usdt_async()
         # average_price = bybit_exchange.fetch_average_buy_price_spot(symbol)
         with TradeDataRepository() as repo:
-            _, average_price = repo.get_current_position_and_avg_price(
-                symbol=symbol
-            )
+            _, average_price = repo.get_current_position_and_avg_price(symbol=symbol)
 
         embed = discordNotification.embed_object_create_helper(
             symbol=symbol,
@@ -284,20 +297,24 @@ async def check_signal(
             order_value=order_result.order_value,
             order_id=order_result.order_id,
             footer="buy_spot.py | bybit",
-            timeframe=timeframe
+            timeframe=timeframe,
         )
 
         # グラフ作成
-        plot_buf = [(notification_plot_buff(
-            df=df,
-            timeframe=timeframe,
-            symbol=symbol,
-            average_price=average_price,
-            limit_price=order_result.price), f"{symbol}_sar.png")]
+        plot_buf = [
+            (
+                notification_plot_buff(
+                    df=df,
+                    timeframe=timeframe,
+                    symbol=symbol,
+                    average_price=average_price,
+                    limit_price=order_result.price,
+                ),
+                f"{symbol}_sar.png",
+            )
+        ]
         await notificator.send_notification_embed_with_file(
-            message="",
-            embeds=[embed],
-            image_buffers=plot_buf
+            message="", embeds=[embed], image_buffers=plot_buf
         )
         logger.info(f"Sent Discord notification for {symbol}")
 
@@ -307,8 +324,33 @@ async def check_signal(
         logger.debug(f"{symbol}: No SAR Up signal detected.")
 
 
-def notification_plot_buff(df: pd.DataFrame, timeframe: str, symbol: str, average_price: float, limit_price: float) -> BytesIO:
+def notification_plot_buff(
+    df: pd.DataFrame,
+    timeframe: str,
+    symbol: str,
+    average_price: float,
+    limit_price: float,
+) -> BytesIO:
     logger.debug(f"Creating plot for {symbol}")
+
+    # Fetch buy/sell trade data for the same time period
+    startDate = df["timestamp"].min()
+    endDate = df["timestamp"].max()
+
+    with TradeDataRepository() as repo:
+        buy_trades = repo.get_closed_long_positions_date(
+            symbol=symbol, start_date=startDate, end_date=endDate
+        )
+        sell_trades = repo.get_closed_short_positions_date(
+            symbol=symbol, start_date=startDate, end_date=endDate
+        )
+
+        buy_dates = [trade.timestamp_utc for trade in buy_trades]
+        sell_dates = [trade.timestamp_utc for trade in sell_trades]
+
+        df = append_dates_with_nearest(df, "buy_date", buy_dates)
+        df = append_dates_with_nearest(df, "sell_date", sell_dates)
+
     fig, ax1 = plt.subplots(1, 1, figsize=(12, 8))
     # 価格チャート
     ax1.plot(
@@ -341,14 +383,44 @@ def notification_plot_buff(df: pd.DataFrame, timeframe: str, symbol: str, averag
 
     # SMA50（オレンジゴールド）
     ax1.plot(
-        df['timestamp'],
-        df['sma_50'],
+        df["timestamp"],
+        df["sma_50"],
         label="SMA 50",
-        color='#FFA726',
+        color="#FFA726",
         linewidth=2.2,
         alpha=0.85,
-        linestyle='-',
-        zorder=2
+        linestyle="-",
+        zorder=2,
+    )
+
+    # ロングした日時をグラフに反映
+    buy_signal_data = df.loc[df["buy_date"].notna()]
+    ax1.scatter(
+        buy_signal_data["timestamp"],
+        buy_signal_data["close"],
+        color="#7CFF82",  # 落ち着いたグリーン
+        s=100,
+        label="Buy",
+        marker="^",
+        alpha=0.9,
+        edgecolors="#2E7D32",
+        linewidths=1.5,
+        zorder=5,
+    )
+
+    # ショートした日時をグラフに反映
+    sell_signal_data = df.loc[df["sell_date"].notna()]
+    ax1.scatter(
+        sell_signal_data["timestamp"],
+        sell_signal_data["close"],
+        color="#FF6E6E",  # ソフトなレッド
+        s=100,
+        label="Sell",
+        marker="v",
+        alpha=0.9,
+        edgecolors="#C62828",
+        linewidths=1.5,
+        zorder=5,
     )
 
     ax1.grid(True, alpha=0.3)
@@ -357,18 +429,35 @@ def notification_plot_buff(df: pd.DataFrame, timeframe: str, symbol: str, averag
     ax1.legend()
 
     if average_price > 0:
-        ax1.axhline(average_price, color='green', ls='--', lw=1,
-                    alpha=0.7, label='Average Buy Price')
-        ax1.text(df['timestamp'].iloc[0], average_price,
-                 f" Average Buy : {average_price:.2f}",
-                 va="bottom", ha="left", fontsize=9)
+        ax1.axhline(
+            average_price,
+            color="green",
+            ls="--",
+            lw=1,
+            alpha=0.7,
+            label="Average Buy Price",
+        )
+        ax1.text(
+            df["timestamp"].iloc[0],
+            average_price,
+            f" Average Buy : {average_price:.2f}",
+            va="bottom",
+            ha="left",
+            fontsize=9,
+        )
 
     if limit_price > 0:
-        ax1.axhline(limit_price, color='green', ls="-", lw=1,
-                    alpha=0.7, label='Limit Buy Price')
-        ax1.text(df['timestamp'].iloc[0], limit_price,
-                 f" Limit Buy : {limit_price:.2f}",
-                 va="bottom", ha="left", fontsize=9)
+        ax1.axhline(
+            limit_price, color="green", ls="-", lw=1, alpha=0.7, label="Limit Buy Price"
+        )
+        ax1.text(
+            df["timestamp"].iloc[0],
+            limit_price,
+            f" Limit Buy : {limit_price:.2f}",
+            va="bottom",
+            ha="left",
+            fontsize=9,
+        )
 
     # 日付ラベルの重なりを防ぐ
     ax1.xaxis.set_major_formatter(mdates.DateFormatter("%m/%d %H:%M"))
@@ -381,6 +470,7 @@ def notification_plot_buff(df: pd.DataFrame, timeframe: str, symbol: str, averag
     img_buffer1 = BytesIO()
     plt.savefig(img_buffer1, format="png", dpi=150, bbox_inches="tight")
     img_buffer1.seek(0)
+    plt.close()
 
     logger.debug(f"Plot for {symbol} created successfully")
     return img_buffer1
