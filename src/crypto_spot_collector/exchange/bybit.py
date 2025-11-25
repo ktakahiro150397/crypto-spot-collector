@@ -29,7 +29,7 @@ class BybitExchange(IExchange):
         self.repo_trade_data = TradeDataRepository()
         logger.info("Bybit exchange client initialized successfully")
 
-    async def __aenter__(self) -> "BybitExchange":
+    async def __aenter__(self) -> "IExchange":
         """Async context manager entry"""
         logger.debug("Entering BybitExchange async context")
         return self
