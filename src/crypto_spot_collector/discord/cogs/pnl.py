@@ -6,13 +6,13 @@ from discord import app_commands
 from discord.ext import commands
 from loguru import logger
 
-from crypto_spot_collector.exchange.bybit import BybitExchange
+from crypto_spot_collector.exchange import IExchange
 from crypto_spot_collector.repository.trade_data_repository import TradeDataRepository
 from crypto_spot_collector.utils.pnl import create_pnl_plot
 
 
 class PnLBybitCog(commands.Cog):
-    def __init__(self, bot: commands.Bot, exchange: BybitExchange) -> None:
+    def __init__(self, bot: commands.Bot, exchange: IExchange) -> None:
         self.bot = bot
         self.exchange = exchange
 

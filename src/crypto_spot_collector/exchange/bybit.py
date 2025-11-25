@@ -1,4 +1,3 @@
-from dataclasses import dataclass
 from datetime import datetime
 from types import TracebackType
 from typing import Any, Optional
@@ -7,32 +6,14 @@ import ccxt
 import ccxt.async_support as ccxt_async
 from loguru import logger
 
+from crypto_spot_collector.exchange.interface import IExchange
+from crypto_spot_collector.exchange.types import SpotAsset, SpotOrderResult
 from crypto_spot_collector.repository.trade_data_repository import TradeDataRepository
 
 # bybit.enable_demo_trading(enable=True)
 
 
-@dataclass
-class SpotOrderResult:
-    """スポット注文の結果を格納するクラス"""
-    order_id: str
-    symbol: str
-    amount: float  # 実際に注文した数量
-    price: float   # 実際に注文した価格
-    order_value: float  # 注文総額 (amount * price)
-    original_order: Any  # 元のorder情報
-
-
-@dataclass
-class SpotAsset:
-    """スポット資産の情報を格納するクラス"""
-    symbol: str
-    total_amount: float  # 総数量
-    current_value: float  # 現在価値
-    profit_loss: float  # 損益
-
-
-class BybitExchange():
+class BybitExchange(IExchange):
     def __init__(self, apiKey: str, secret: str) -> None:
         logger.info("Initializing Bybit exchange client")
         self.exchange = ccxt.bybit({

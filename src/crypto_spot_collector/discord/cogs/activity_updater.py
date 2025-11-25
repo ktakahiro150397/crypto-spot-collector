@@ -4,12 +4,12 @@ import discord
 from discord.ext import commands, tasks
 from loguru import logger
 
-from crypto_spot_collector.exchange.bybit import BybitExchange
+from crypto_spot_collector.exchange import IExchange
 from crypto_spot_collector.repository.trade_data_repository import TradeDataRepository
 
 
 class ActivityUpdaterCog(commands.Cog):
-    def __init__(self, bot: commands.Bot, exchange: BybitExchange) -> None:
+    def __init__(self, bot: commands.Bot, exchange: IExchange) -> None:
         self.bot = bot
         self.exchange = exchange
         self.update_activity.start()
