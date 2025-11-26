@@ -8,7 +8,7 @@ import pandas as pd
 from loguru import logger
 from matplotlib import pyplot as plt
 
-from crypto_spot_collector.exchange.bybit import BybitExchange
+from crypto_spot_collector.exchange import IExchange
 from crypto_spot_collector.providers.market_data_provider import MarketDataProvider
 from crypto_spot_collector.repository.trade_data_repository import TradeDataRepository
 from crypto_spot_collector.utils.dataframe import append_dates_with_nearest
@@ -23,7 +23,7 @@ class CreatePnlResult:
     df: pd.DataFrame = None
 
 
-async def create_pnl_plot(exchange: BybitExchange,
+async def create_pnl_plot(exchange: IExchange,
                           tradeRepo: TradeDataRepository) -> CreatePnlResult:
     result = CreatePnlResult()
 

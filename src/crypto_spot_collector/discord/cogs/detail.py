@@ -12,7 +12,7 @@ from matplotlib import pyplot as plt
 from ta.trend import PSARIndicator
 
 from crypto_spot_collector.apps.buy_spot import spot_symbol
-from crypto_spot_collector.exchange.bybit import BybitExchange
+from crypto_spot_collector.exchange import IExchange
 from crypto_spot_collector.repository.ohlcv_repository import OHLCVRepository
 from crypto_spot_collector.repository.trade_data_repository import TradeDataRepository
 from crypto_spot_collector.utils.dataframe import append_dates_with_nearest
@@ -22,7 +22,7 @@ auto_complete_symbols.sort()
 
 
 class DetailBybitCog(commands.Cog):
-    def __init__(self, bot: commands.Bot, exchange: BybitExchange) -> None:
+    def __init__(self, bot: commands.Bot, exchange: IExchange) -> None:
         self.bot = bot
         self.exchange = exchange
 
