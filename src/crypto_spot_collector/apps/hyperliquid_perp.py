@@ -1,10 +1,12 @@
 import sys
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from loguru import logger
 
+from crypto_spot_collector.apps.import_historical_data import HistoricalDataImporter
 from crypto_spot_collector.exchange.hyperliquid import HyperLiquidExchange
+from crypto_spot_collector.repository.ohlcv_repository import OHLCVRepository
 from crypto_spot_collector.utils.secrets import load_config
 
 # ログ設定
@@ -77,6 +79,34 @@ async def main() -> None:
     symbol = "XRP/USDC:USDC"
     price = 2.15
     amount = 5.0
+
+    baseDate = datetime(2025, 11, 30)
+    fromDate = baseDate - timedelta(days=1)
+
+    ohlcv_data = await hyperliquid_exchange.fetch_ohlcv_async(
+        symbol=symbol,
+        timeframe="1m",
+        fromDate=fromDate,
+        toDate=datetime(2025, 11, 30)
+    )
+
+    logger.info(f"Fetched {len(ohlcv_data)} OHLCV records for {symbol}")
+    logger.info(f"First 5 OHLCV records: {ohlcv_data[:5]}")
+    logger.info(f"Last 5 OHLCV records: {ohlcv_data[-5:]}")
+
+    importer = HistoricalDataImporter()
+    importer.register_data(
+        symbol=symbol,
+        data=ohlcv_data,
+    )
+
+    repo = OHLCVRepository()
+    records = repo.get_latest_ohlcv_data(
+        symbol=symbol,
+        limit=5,
+    )
+    logger.info(
+        f"Latest {len(records)} OHLCV records for {symbol} fetched from database.")
 
     # order_result = await hyperliquid_exchange.create_order_perp_long_async(
     #     symbol=symbol,

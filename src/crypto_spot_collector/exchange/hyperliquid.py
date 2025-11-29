@@ -104,9 +104,21 @@ class HyperLiquidExchange(IExchange):
         fromDate: datetime,
         toDate: datetime
     ) -> dict[Any, Any]:
-        logger.warning("fetch_ohlcv_async not yet implemented for HyperLiquid")
-        raise NotImplementedError(
-            "fetch_ohlcv_async is not yet implemented for HyperLiquid")
+        logger.debug(
+            f"Fetching OHLCV data for {symbol} asynchronously from {fromDate} to {toDate} with timeframe {timeframe}")
+        ohlcv: dict[Any, Any] = await self.exchange_public.fetch_ohlcv(
+            symbol,
+            timeframe=timeframe,
+            since=int(fromDate.timestamp() * 1000),
+            limit=None
+        )
+        if ohlcv:
+            logger.debug(
+                f"OHLCV data fetched for {symbol}: {len(ohlcv)} records (async)")
+            return ohlcv
+        else:
+            logger.error(f"OHLCV data not found for symbol {symbol}")
+            raise Exception(f"OHLCV data not found for symbol {symbol}")
 
     async def fetch_currency_async(self) -> dict[Any, Any]:
         logger.debug("Fetching currency data asynchronously")
