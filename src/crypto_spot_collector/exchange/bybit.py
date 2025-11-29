@@ -404,9 +404,23 @@ class BybitExchange(IExchange):
             logger.error(f"Failed to create spot order for {symbol}: {e}")
             raise
 
-    async def create_order_perp_long_async(self, symbol):
+    async def create_order_perp_long_async(
+        self,
+        symbol: str,
+        amount: float,
+        price: float,
+    ) -> Any:
         raise NotImplementedError(
             "create_order_perp_long_async is not yet implemented for Bybit")
+
+    async def create_order_perp_short_async(
+        self,
+        symbol: str,
+        amount: float,
+        price: float,
+    ) -> Any:
+        raise NotImplementedError(
+            "create_order_perp_short_async is not yet implemented for Bybit")
 
     def fetch_average_buy_price_spot(self, symbol: str) -> float:
         logger.debug(f"Fetching average buy price for {symbol} spot")

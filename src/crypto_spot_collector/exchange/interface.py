@@ -80,17 +80,21 @@ class IExchange(ABC):
     async def create_order_perp_long_async(
         self,
         symbol: str,
+        amount: float,
+        price: float,
     ) -> Any:
         """Create a perpetual long order asynchronously."""
         pass
 
-    # @abstractmethod
-    # async def create_order_perp_short_async(
-    #     self,
-    #     symbol: str,
-    # ) -> Any:
-    #     """Create a perpetual short order asynchronously."""
-    #     pass
+    @abstractmethod
+    async def create_order_perp_short_async(
+        self,
+        symbol: str,
+        amount: float,
+        price: float,
+    ) -> Any:
+        """Create a perpetual short order asynchronously."""
+        pass
 
     # @abstractmethod
     # async def close_position_perp_async(

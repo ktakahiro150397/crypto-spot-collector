@@ -53,6 +53,9 @@ async def main() -> None:
         mainWalletAddress=secrets["hyperliquid"]["mainWalletAddress"],
         apiWalletAddress=secrets["hyperliquid"]["apiWalletAddress"],
         privateKey=secrets["hyperliquid"]["privatekey"],
+        take_profit_rate=secrets["settings"]["perpetual"]["take_profit_rate"],
+        stop_loss_rate=secrets["settings"]["perpetual"]["stop_loss_rate"],
+        leverage=secrets["settings"]["perpetual"]["leverage"],
     )
 
     # currencies = await hyperliquid_exchange.fetch_currency_async()
@@ -72,15 +75,22 @@ async def main() -> None:
     #     logger.info(f"{feature}")
 
     symbol = "XRP/USDC:USDC"
-    price = 2.19
+    price = 2.15
     amount = 5.0
 
-    order_result = await hyperliquid_exchange.create_order_perp_long_async(
-        symbol=symbol,
-        amount=amount,
-        price=price,
-    )
-    logger.info(f"Perpetual long order result: {order_result}")
+    # order_result = await hyperliquid_exchange.create_order_perp_long_async(
+    #     symbol=symbol,
+    #     amount=amount,
+    #     price=price,
+    # )
+    # logger.info(f"Perpetual long order result: {order_result}")
+
+    # order_result = await hyperliquid_exchange.create_order_perp_short_async(
+    #     symbol=symbol,
+    #     amount=amount,
+    #     price=price,
+    # )
+    # logger.info(f"Perpetual short order result: {order_result}")
 
     await hyperliquid_exchange.close()
 

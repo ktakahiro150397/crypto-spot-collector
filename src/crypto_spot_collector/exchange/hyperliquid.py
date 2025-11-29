@@ -11,7 +11,13 @@ from crypto_spot_collector.exchange.types import SpotAsset, SpotOrderResult
 
 
 class HyperLiquidExchange(IExchange):
-    def __init__(self, mainWalletAddress: str, apiWalletAddress: str, privateKey: str) -> None:
+    def __init__(self,
+                 mainWalletAddress: str,
+                 apiWalletAddress: str,
+                 privateKey: str,
+                 take_profit_rate: float,
+                 stop_loss_rate: float,
+                 leverage: int,) -> None:
         logger.info("Initializing HyperLiquid exchange client")
         self.exchange_public = ccxt_async.hyperliquid({
             "walletAddress": mainWalletAddress,
@@ -22,8 +28,13 @@ class HyperLiquidExchange(IExchange):
             "privateKey": privateKey,
         })
 
-        self.take_profit_rate = 0.02  # 2%
-        self.stop_loss_rate = 0.02    # 2%
+        self.take_profit_rate = take_profit_rate
+        self.stop_loss_rate = stop_loss_rate
+        self.leverage = leverage
+
+        logger.info(
+            f"HyperLiquid exchange client initialized successfully."
+            f"Take Profit Rate: {self.take_profit_rate * 100:.2f}%, Stop Loss Rate: {self.stop_loss_rate * 100:.2f}%, Leverage: x{self.leverage}")
 
     async def __aenter__(self) -> "IExchange":
         """Async context manager entry"""
@@ -131,8 +142,9 @@ class HyperLiquidExchange(IExchange):
         grouping='normalTpsl'でグループ化します。
         これによりWebUIと同じようにグルーピングされた注文が作成されます。
         """
-        tp_trigger = price * (1 + self.take_profit_rate)
-        sl_trigger = price * (1 - self.stop_loss_rate)
+        # ROEベースのTP/SL計算
+        tp_trigger = price * (1 + self.take_profit_rate / self.leverage)
+        sl_trigger = price * (1 - self.stop_loss_rate / self.leverage)
 
         result = await self.exchange_private.create_order(
             symbol=symbol,
@@ -141,7 +153,7 @@ class HyperLiquidExchange(IExchange):
             amount=amount,
             price=price,
             params={
-                "postOnly": True,
+                # "postOnly": True,
                 "stopLoss": {
                     "type": "market",  # SLはmarketで即座に決済
                     "triggerPrice": sl_trigger,
@@ -155,7 +167,43 @@ class HyperLiquidExchange(IExchange):
 
         logger.info(
             f"Perpetual long order created for {symbol} at price {price} with amount {amount}. "
-            f"TP trigger: {tp_trigger:.2f}, SL trigger: {sl_trigger:.2f} (async)"
+            f"TP trigger: {tp_trigger:.2f}, SL trigger: {sl_trigger:.2f}"
+        )
+
+        return result
+
+    async def create_order_perp_short_async(
+        self,
+        symbol: str,
+        amount: float,
+        price: float,
+    ) -> Any:
+        # ROEベースのTP/SL計算
+        tp_trigger = price * (1 - self.take_profit_rate / self.leverage)
+        sl_trigger = price * (1 + self.stop_loss_rate / self.leverage)
+
+        result = await self.exchange_private.create_order(
+            symbol=symbol,
+            type="limit",
+            side="sell",
+            amount=amount,
+            price=price,
+            params={
+                # "postOnly": True,
+                "stopLoss": {
+                    "type": "market",  # SLはmarketで即座に決済
+                    "triggerPrice": sl_trigger,
+                },
+                "takeProfit": {
+                    "type": "market",  # TPもmarketで即座に決済
+                    "triggerPrice": tp_trigger,
+                }
+            }
+        )
+
+        logger.info(
+            f"Perpetual short order created for {symbol} at price {price} with amount {amount}. "
+            f"TP trigger: {tp_trigger:.2f}, SL trigger: {sl_trigger:.2f}"
         )
 
         return result
