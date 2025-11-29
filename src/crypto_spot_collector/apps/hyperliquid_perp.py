@@ -13,7 +13,8 @@ LOG_DIR = Path(__file__).parent / "logs"
 LOG_DIR.mkdir(exist_ok=True)
 
 # ログファイル名（日付付き）
-log_file = LOG_DIR / f"buy_spot_{datetime.now().strftime('%Y%m%d')}.log"
+log_file = LOG_DIR / \
+    f"hyperliquid_perp_{datetime.now().strftime('%Y%m%d')}.log"
 
 # loguruのログ設定
 # デフォルトのハンドラーを削除
@@ -54,13 +55,32 @@ async def main() -> None:
         privateKey=secrets["hyperliquid"]["privatekey"],
     )
 
-    currencies = await hyperliquid_exchange.fetch_currency_async()
-    logger.info(f"Fetched {len(currencies)} currencies from HyperLiquid")
-    for currency in currencies.values():
-        logger.info(f"Currency: {currency['code']}, Details: {currency}")
+    # currencies = await hyperliquid_exchange.fetch_currency_async()
+    # logger.info(f"Fetched {len(currencies)} currencies from HyperLiquid")
+    # for currency in currencies.values():
+    #     logger.info(f"Currency: {currency['code']}, Details: {currency}")
 
-    free_usdt = await hyperliquid_exchange.fetch_free_usdt_async()
-    logger.info(f"Free USDC balance: {free_usdt}")
+    # free_usdt = await hyperliquid_exchange.fetch_free_usdt_async()
+    # logger.info(f"Free USDC balance: {free_usdt}")
+
+    # tickers = await hyperliquid_exchange.exchange_public.fetch_tickers()
+    # logger.info(f"Fetched {len(tickers)} tickers from HyperLiquid")
+    # for symbol, ticker in tickers.items():
+    #     logger.info(f"Ticker: {symbol}")
+
+    # for feature in hyperliquid_exchange.exchange_public.features:
+    #     logger.info(f"{feature}")
+
+    symbol = "XRP/USDC:USDC"
+    price = 2.19
+    amount = 5.0
+
+    order_result = await hyperliquid_exchange.create_order_perp_long_async(
+        symbol=symbol,
+        amount=amount,
+        price=price,
+    )
+    logger.info(f"Perpetual long order result: {order_result}")
 
     await hyperliquid_exchange.close()
 

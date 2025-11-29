@@ -22,6 +22,9 @@ class HyperLiquidExchange(IExchange):
             "privateKey": privateKey,
         })
 
+        self.take_profit_rate = 0.02  # 2%
+        self.stop_loss_rate = 0.02    # 2%
+
     async def __aenter__(self) -> "IExchange":
         """Async context manager entry"""
         logger.debug("Entering HyperLiquidExchange async context")
@@ -114,6 +117,48 @@ class HyperLiquidExchange(IExchange):
             "create_order_spot_async not yet implemented for HyperLiquid")
         raise NotImplementedError(
             "create_order_spot_async is not yet implemented for HyperLiquid")
+
+    async def create_order_perp_long_async(
+        self,
+        symbol: str,
+        amount: float,
+        price: float,
+    ) -> Any:
+        """
+        Create a perpetual long order with Take Profit and Stop Loss.
+
+        ccxtが自動的にTP/SL注文をメイン注文と一緒に作成し、
+        grouping='normalTpsl'でグループ化します。
+        これによりWebUIと同じようにグルーピングされた注文が作成されます。
+        """
+        tp_trigger = price * (1 + self.take_profit_rate)
+        sl_trigger = price * (1 - self.stop_loss_rate)
+
+        result = await self.exchange_private.create_order(
+            symbol=symbol,
+            type="limit",
+            side="buy",
+            amount=amount,
+            price=price,
+            params={
+                "postOnly": True,
+                "stopLoss": {
+                    "type": "market",  # SLはmarketで即座に決済
+                    "triggerPrice": sl_trigger,
+                },
+                "takeProfit": {
+                    "type": "market",  # TPもmarketで即座に決済
+                    "triggerPrice": tp_trigger,
+                }
+            }
+        )
+
+        logger.info(
+            f"Perpetual long order created for {symbol} at price {price} with amount {amount}. "
+            f"TP trigger: {tp_trigger:.2f}, SL trigger: {sl_trigger:.2f} (async)"
+        )
+
+        return result
 
     async def fetch_average_buy_price_spot_async(self, symbol: str) -> float:
         logger.warning(
