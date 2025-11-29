@@ -1,11 +1,12 @@
 from datetime import datetime
 from types import TracebackType
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 import ccxt.async_support as ccxt_async
 from ccxt.async_support.hyperliquid import hyperliquid
 from loguru import logger
 
+from crypto_spot_collector.exchange.hyperliquid_ws import HyperLiquidWebSocket
 from crypto_spot_collector.exchange.interface import IExchange
 from crypto_spot_collector.exchange.types import SpotAsset, SpotOrderResult
 
@@ -17,7 +18,8 @@ class HyperLiquidExchange(IExchange):
                  privateKey: str,
                  take_profit_rate: float,
                  stop_loss_rate: float,
-                 leverage: int,) -> None:
+                 leverage: int,
+                 testnet: bool = False,) -> None:
         logger.info("Initializing HyperLiquid exchange client")
         self.exchange_public = ccxt_async.hyperliquid({
             "walletAddress": mainWalletAddress,
@@ -32,9 +34,16 @@ class HyperLiquidExchange(IExchange):
         self.stop_loss_rate = stop_loss_rate
         self.leverage = leverage
 
+        # WebSocketクライアントの初期化
+        self.ws_client = HyperLiquidWebSocket(testnet=testnet)
+
         logger.info(
-            f"HyperLiquid exchange client initialized successfully."
-            f"Take Profit Rate: {self.take_profit_rate * 100:.2f}%, Stop Loss Rate: {self.stop_loss_rate * 100:.2f}%, Leverage: x{self.leverage}")
+            f"HyperLiquid exchange client initialized successfully. "
+            f"Take Profit Rate: {self.take_profit_rate * 100:.2f}%, "
+            f"Stop Loss Rate: {self.stop_loss_rate * 100:.2f}%, "
+            f"Leverage: x{self.leverage}, "
+            f"Network: {'testnet' if testnet else 'mainnet'}"
+        )
 
     async def __aenter__(self) -> "IExchange":
         """Async context manager entry"""
@@ -55,9 +64,15 @@ class HyperLiquidExchange(IExchange):
     async def close(self) -> None:
         """Explicitly close all exchange connections"""
         logger.info("Closing HyperLiquid exchange connections")
-        if hasattr(self, 'exchange') and self.exchange_public:
+        if hasattr(self, 'exchange_public') and self.exchange_public:
             await self.exchange_public.close()
-            logger.debug("Exchange connection closed")
+            logger.debug("Public exchange connection closed")
+        if hasattr(self, 'exchange_private') and self.exchange_private:
+            await self.exchange_private.close()
+            logger.debug("Private exchange connection closed")
+        if hasattr(self, 'ws_client') and self.ws_client:
+            await self.ws_client.disconnect()
+            logger.debug("WebSocket connection closed")
         logger.info("All HyperLiquid exchange connections closed successfully")
 
     async def fetch_balance_async(self) -> Any:
@@ -264,3 +279,74 @@ class HyperLiquidExchange(IExchange):
             "get_spot_portfolio_async not yet implemented for HyperLiquid")
         raise NotImplementedError(
             "get_spot_portfolio_async is not yet implemented for HyperLiquid")
+
+    async def subscribe_ohlcv_ws(
+        self,
+        symbol: str,
+        interval: str,
+        callback: Callable[[dict[str, Any]], None]
+    ) -> None:
+        """
+        Subscribe to OHLCV (candle) updates via WebSocket.
+
+        Args:
+            symbol: Trading pair symbol (e.g., "XRP/USDC:USDC")
+            interval: Candle interval (e.g., "1m", "5m", "1h", "1d")
+            callback: Callback function to handle incoming candle data
+
+        Example:
+            async def handle_candle(candles):
+                for candle in candles:
+                    print(f"New candle: {candle}")
+
+            await exchange.subscribe_ohlcv_ws("XRP/USDC:USDC", "1m", handle_candle)
+        """
+        # Convert CCXT symbol format to HyperLiquid format
+        # XRP/USDC:USDC -> XRP
+        coin = symbol.split('/')[0]
+
+        # Connect WebSocket if not already connected
+        if self.ws_client.ws is None:
+            await self.ws_client.connect()
+
+        # Subscribe to candle data
+        await self.ws_client.subscribe_candle(coin, interval, callback)
+        logger.info(
+            f"Subscribed to {symbol} ({coin}) OHLCV data with {interval} interval via WebSocket"
+        )
+
+    async def start_ws_listener(self) -> None:
+        """
+        Start listening for WebSocket messages.
+
+        This should be run as a background task.
+
+        Example:
+            # Create background task for WebSocket listener
+            listener_task = asyncio.create_task(exchange.start_ws_listener())
+
+            # Subscribe to data
+            await exchange.subscribe_ohlcv_ws("XRP/USDC:USDC", "1m", callback)
+
+            # ... do other work ...
+
+            # Clean up
+            await exchange.close()  # This will stop the listener
+        """
+        await self.ws_client.listen()
+
+    async def unsubscribe_ohlcv_ws(self, symbol: str, interval: str) -> None:
+        """
+        Unsubscribe from OHLCV updates via WebSocket.
+
+        Args:
+            symbol: Trading pair symbol (e.g., "XRP/USDC:USDC")
+            interval: Candle interval (e.g., "1m", "5m", "1h", "1d")
+        """
+        # Convert CCXT symbol format to HyperLiquid format
+        coin = symbol.split('/')[0]
+
+        await self.ws_client.unsubscribe_candle(coin, interval)
+        logger.info(
+            f"Unsubscribed from {symbol} ({coin}) OHLCV data with {interval} interval"
+        )

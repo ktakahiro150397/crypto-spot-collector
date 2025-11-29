@@ -1,6 +1,7 @@
 import sys
 from datetime import datetime, timedelta
 from pathlib import Path
+from typing import Any
 
 from loguru import logger
 
@@ -47,10 +48,126 @@ secret_file = Path(__file__).parent / "secrets.json"
 settings_file = Path(__file__).parent / "settings.json"
 secrets = load_config(secret_file, settings_file)
 
+repo = OHLCVRepository()
+importer = HistoricalDataImporter()
+
+
 logger.info("Configuration loaded successfully")
 
 
+async def test_minimal_ws() -> None:
+    """最小限のWebSocket購読テスト - candleを購読"""
+    import asyncio
+    import json
+    import time
+
+    import websockets
+
+    ws_url = "wss://api.hyperliquid.xyz/ws"
+
+    async with websockets.connect(ws_url) as websocket:
+        # XRPの1分足キャンドルを購読
+        subscription = {
+            "method": "subscribe",
+            "subscription": {
+                "type": "candle",
+                "coin": "XRP",
+                "interval": "1m"
+            }
+        }
+
+        await websocket.send(json.dumps(subscription))
+        logger.info(f"Sent subscription: {subscription}")
+
+        last_receive_time = None
+
+        # 最初の20メッセージを受信してタイミングを確認
+        for i in range(20):
+            message = await websocket.recv()
+            current_time = time.time()
+            data = json.loads(message)
+
+            # 前回からの経過時間を計算
+            interval_seconds = None
+            if last_receive_time is not None:
+                interval_seconds = current_time - last_receive_time
+            last_receive_time = current_time
+
+            # subscriptionResponseは簡潔に表示
+            if data.get("channel") == "subscriptionResponse":
+                logger.info(f"Message #{i+1}: Subscription confirmed")
+            else:
+                interval_info = f"(+{interval_seconds:.3f}s)" if interval_seconds else ""
+                logger.info(
+                    f"Message #{i+1} {interval_info} - Channel: {data.get('channel')}")
+
+                # キャンドルデータの場合、詳細を表示
+                if data.get("channel") == "candle":
+                    candles = data.get("data", [])
+                    for candle in candles if isinstance(candles, list) else [candles]:
+                        logger.info(
+                            f"  Candle: {candle.get('s')} {candle.get('i')} | "
+                            f"Time: {candle.get('t')} - {candle.get('T')} | "
+                            f"O: {candle.get('o')}, H: {candle.get('h')}, "
+                            f"L: {candle.get('l')}, C: {candle.get('c')}, "
+                            f"V: {candle.get('v')}, Trades: {candle.get('n')}"
+                        )
+
+
+def handle_candle(candles: Any) -> None:
+    """キャンドルデータを受信したときのコールバック"""
+    # nonlocal candle_count
+    logger.info(f"handle_candle called! Received data: {candles}")
+    for candle in candles if isinstance(candles, list) else [candles]:
+        # candle_count += 1
+
+        logger.info(f"t : {candle.get('t')}"
+                    f"T : {candle.get('T')}"
+                    f"o : {candle.get('o')}")
+
+        ohlvc_data = [
+            candle.get("t"),  # ミリ秒のまま渡す（register_data内で変換される）
+            candle.get("o"),
+            candle.get("h"),
+            candle.get("l"),
+            candle.get("c"),
+            candle.get("v"),
+        ]
+
+        logger.debug(f"Prepared OHLCV data: {ohlvc_data}")
+
+        result = importer.register_data(
+            symbol="XRP_ws",
+            data=[ohlvc_data]
+        )
+        logger.info(f"register_data returned: {result}")
+
+        logger.info(
+            f"Symbol: {candle.get('s')}, "
+            f"Interval: {candle.get('i')}, "
+            f"Open: {candle.get('o')}, "
+            f"High: {candle.get('h')}, "
+            f"Low: {candle.get('l')}, "
+            f"Close: {candle.get('c')}, "
+            f"Volume: {candle.get('v')}"
+        )
+
+        # logger.info(
+        #     f"Candle #{candle_count}: "
+        #     f"Time: {candle.get('t')} - {candle.get('T')}, "
+        #     f"Symbol: {candle.get('s')}, "
+        #     f"Interval: {candle.get('i')}, "
+        #     f"Open: {candle.get('o')}, "
+        #     f"High: {candle.get('h')}, "
+        #     f"Low: {candle.get('l')}, "
+        #     f"Close: {candle.get('c')}, "
+        #     f"Volume: {candle.get('v')}, "
+        #     f"Trades: {candle.get('n')}"
+        # )
+
+
 async def main() -> None:
+    # HyperLiquidExchangeのWebSocket機能をテスト
     hyperliquid_exchange = HyperLiquidExchange(
         mainWalletAddress=secrets["hyperliquid"]["mainWalletAddress"],
         apiWalletAddress=secrets["hyperliquid"]["apiWalletAddress"],
@@ -58,71 +175,56 @@ async def main() -> None:
         take_profit_rate=secrets["settings"]["perpetual"]["take_profit_rate"],
         stop_loss_rate=secrets["settings"]["perpetual"]["stop_loss_rate"],
         leverage=secrets["settings"]["perpetual"]["leverage"],
+        testnet=False,  # Use mainnet
     )
-
-    # currencies = await hyperliquid_exchange.fetch_currency_async()
-    # logger.info(f"Fetched {len(currencies)} currencies from HyperLiquid")
-    # for currency in currencies.values():
-    #     logger.info(f"Currency: {currency['code']}, Details: {currency}")
-
-    # free_usdt = await hyperliquid_exchange.fetch_free_usdt_async()
-    # logger.info(f"Free USDC balance: {free_usdt}")
-
-    # tickers = await hyperliquid_exchange.exchange_public.fetch_tickers()
-    # logger.info(f"Fetched {len(tickers)} tickers from HyperLiquid")
-    # for symbol, ticker in tickers.items():
-    #     logger.info(f"Ticker: {symbol}")
-
-    # for feature in hyperliquid_exchange.exchange_public.features:
-    #     logger.info(f"{feature}")
 
     symbol = "XRP/USDC:USDC"
-    price = 2.15
-    amount = 5.0
 
-    baseDate = datetime(2025, 11, 30)
-    fromDate = baseDate - timedelta(days=1)
+    # WebSocket経由でOHLCVデータを購読するテスト
+    candle_count = 0
+    max_candles = 10  # 10本のキャンドルを受信したら終了
 
-    ohlcv_data = await hyperliquid_exchange.fetch_ohlcv_async(
-        symbol=symbol,
-        timeframe="1m",
-        fromDate=fromDate,
-        toDate=datetime(2025, 11, 30)
-    )
+    logger.info("Starting WebSocket listener task...")
 
-    logger.info(f"Fetched {len(ohlcv_data)} OHLCV records for {symbol}")
-    logger.info(f"First 5 OHLCV records: {ohlcv_data[:5]}")
-    logger.info(f"Last 5 OHLCV records: {ohlcv_data[-5:]}")
+    try:
 
-    importer = HistoricalDataImporter()
-    importer.register_data(
-        symbol=symbol,
-        data=ohlcv_data,
-    )
+        logger.info("Subscribing to OHLCV WebSocket...")
+        # OHLCVデータを購読（内部でconnectも呼ばれる）
+        await hyperliquid_exchange.subscribe_ohlcv_ws(
+            symbol=symbol,
+            interval="1m",
+            callback=handle_candle
+        )
 
-    repo = OHLCVRepository()
-    records = repo.get_latest_ohlcv_data(
-        symbol=symbol,
-        limit=5,
-    )
-    logger.info(
-        f"Latest {len(records)} OHLCV records for {symbol} fetched from database.")
+        # 購読後にリスナーを開始
+        listener_task = asyncio.create_task(
+            hyperliquid_exchange.start_ws_listener())
 
-    # order_result = await hyperliquid_exchange.create_order_perp_long_async(
-    #     symbol=symbol,
-    #     amount=amount,
-    #     price=price,
-    # )
-    # logger.info(f"Perpetual long order result: {order_result}")
+        # リスナーが開始するまで少し待つ
+        await asyncio.sleep(0.5)
 
-    # order_result = await hyperliquid_exchange.create_order_perp_short_async(
-    #     symbol=symbol,
-    #     amount=amount,
-    #     price=price,
-    # )
-    # logger.info(f"Perpetual short order result: {order_result}")
+        logger.info(f"Waiting for {max_candles} candles...")
+        # 指定数のキャンドルを受信するまで待機
+        while candle_count < max_candles:
+            logger.debug(f"Candle count: {candle_count}/{max_candles}")
+            await asyncio.sleep(1)
 
-    await hyperliquid_exchange.close()
+        logger.info(
+            f"Received {candle_count} candles. Unsubscribing and closing connection.")
+
+        # 購読解除
+        await hyperliquid_exchange.unsubscribe_ohlcv_ws(symbol=symbol, interval="1m")
+
+    except KeyboardInterrupt:
+        logger.info("Interrupted by user")
+    finally:
+        # クリーンアップ
+        await hyperliquid_exchange.close()
+        listener_task.cancel()
+        try:
+            await listener_task
+        except asyncio.CancelledError:
+            pass
 
 if __name__ == "__main__":
     import asyncio
