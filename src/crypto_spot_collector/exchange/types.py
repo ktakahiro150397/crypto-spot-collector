@@ -1,7 +1,15 @@
 """Data types for exchange operations."""
 
 from dataclasses import dataclass
+from enum import Enum
 from typing import Any
+
+
+class PositionSide(Enum):
+    """Position side for perpetual contracts."""
+    LONG = "long"
+    SHORT = "short"
+    ALL = "all"
 
 
 @dataclass

@@ -69,7 +69,7 @@ async def main() -> None:
 
     with OHLCVRepository() as repo:
         data = repo.get_ohlcv_data(
-            symbol="XRP_hl_perp",
+            symbol="XRP/USDC:USDC",
             interval="1m",
             from_datetime=startDate,
             to_datetime=endDate

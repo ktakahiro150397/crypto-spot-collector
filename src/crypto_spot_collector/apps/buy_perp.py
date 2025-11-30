@@ -14,6 +14,7 @@ from matplotlib import pyplot as plt
 from crypto_spot_collector.apps.import_historical_data import HistoricalDataImporter
 from crypto_spot_collector.checkers.sar_checker import SARChecker
 from crypto_spot_collector.exchange.hyperliquid import HyperLiquidExchange
+from crypto_spot_collector.exchange.types import PositionSide
 from crypto_spot_collector.notification.discord import discordNotification
 from crypto_spot_collector.providers.market_data_provider import MarketDataProvider
 from crypto_spot_collector.utils.secrets import load_config
@@ -162,10 +163,13 @@ async def main() -> None:
     """メインループ: 毎分0秒に実行"""
     logger.info("Starting buy perp script")
 
+    timeframe_perp = secrets["settings"]["perpetual"].get("timeframe", "5m")
+
     logger.info("---- Settings ----")
     logger.info(
         f"Discord Webhook URL: {secrets['discord']['discordWebhookUrl']}")
     logger.info(f"Perp Symbols: {perp_symbols}")
+    logger.info(f"Timeframe: {timeframe_perp}")
     logger.info(
         f"Take Profit Rate: {secrets['settings']['perpetual']['take_profit_rate']}"
     )
@@ -179,11 +183,13 @@ async def main() -> None:
 
     while True:
         # 次の1分0秒まで待機処理
-        run_second = 1
         now = datetime.now(timezone.utc)
         logger.info(f"Current time: {now}")
-        next_run = (now + timedelta(minutes=1, seconds=run_second)
-                    ).replace(second=run_second, microsecond=0)
+
+        run_minute = int(timeframe_perp.replace("m", ""))
+
+        next_run = (now + timedelta(minutes=run_minute, seconds=0)
+                    ).replace(second=0, microsecond=0)
         wait_seconds = (next_run - now).total_seconds()
         logger.info(
             f"Waiting for {wait_seconds} seconds until next run at {next_run} UTC"
@@ -204,7 +210,7 @@ async def main() -> None:
                 # 過去1時間のOHLCVデータを取得
                 ohlcv = await hyperliquid_exchange.fetch_ohlcv_async(
                     symbol=f"{symbol}/USDC:USDC",
-                    timeframe="1m",
+                    timeframe=timeframe_perp,
                     fromDate=fromDateUtc,
                     toDate=toDateUtc,
                 )
@@ -218,14 +224,15 @@ async def main() -> None:
                         f"Last OHLCV record timestamp: {ohlcv[-1][0]} ({datetime.fromtimestamp(ohlcv[-1][0]/1000, tz=timezone.utc)})")
 
                 # OHLCVデータの登録
-                importer.register_data(f"{symbol.upper()}_hl_perp", ohlcv)
+                importer.register_data(f"{symbol}/USDC:USDC", ohlcv)
                 logger.debug(f"Registered OHLCV data for {symbol.upper()}")
 
                 # シグナルチェック
                 await check_signal(
                     startDate=fromDateUtc,
                     endDate=toDateUtc,
-                    symbol=f"{symbol.upper()}_hl_perp",
+                    symbol=f"{symbol}/USDC:USDC",
+                    timeframe=timeframe_perp,
                     amountByUSDC=amount_by_usdc,
                 )
             except Exception as e:
@@ -237,6 +244,7 @@ async def check_signal(
     startDate: datetime,
     endDate: datetime,
     symbol: str,
+    timeframe: str,
     amountByUSDC: float,
 ) -> None:
     """シグナルをチェックし、ロング/ショートのオーダーを発注する。"""
@@ -247,7 +255,7 @@ async def check_signal(
     data_provider = MarketDataProvider()
     df = data_provider.get_dataframe_with_indicators(
         symbol=symbol,
-        interval="1m",
+        interval=timeframe,
         from_datetime=startDate,
         to_datetime=endDate,
         sma_windows=[20, 50],
@@ -267,15 +275,23 @@ async def check_signal(
     logger.info(
         f"{symbol}: Long Signal: {long_signal}, Short Signal: {short_signal}")
 
+    if long_signal or short_signal:
+        # いずれかのシグナルがTrueの場合、既存のポジションはクローズする
+        await hyperliquid_exchange.close_all_positions_perp_async(
+            side=PositionSide.ALL
+        )
+
     if long_signal:
         await execute_long_order(
             symbol=symbol,
+            timeframe=timeframe,
             df=df,
             amountByUSDC=amountByUSDC,
         )
     elif short_signal:
         await execute_short_order(
             symbol=symbol,
+            timeframe=timeframe,
             df=df,
             amountByUSDC=amountByUSDC,
         )
@@ -285,6 +301,7 @@ async def check_signal(
 
 async def execute_long_order(
     symbol: str,
+    timeframe: str,
     df: pd.DataFrame,
     amountByUSDC: float,
 ) -> None:
@@ -293,7 +310,7 @@ async def execute_long_order(
 
     try:
         # 現在価格を取得
-        ticker = await hyperliquid_exchange.fetch_price_async(f"{symbol}/USDC:USDC")
+        ticker = await hyperliquid_exchange.fetch_price_async(f"{symbol}")
         current_price = ticker["last"]
 
         # 注文数量を計算
@@ -301,7 +318,7 @@ async def execute_long_order(
 
         # ロングオーダー発注
         order_result = await hyperliquid_exchange.create_order_perp_long_async(
-            symbol=f"{symbol}/USDC:USDC",
+            symbol=f"{symbol}",
             amount=amount,
             price=current_price,
         )
@@ -319,7 +336,7 @@ async def execute_long_order(
             order_id=order_result.get("id", "N/A"),
             position_type="LONG",
             footer="buy_perp.py | hyperliquid",
-            timeframe="1m",
+            timeframe=timeframe,
         )
 
         # グラフ作成
@@ -327,7 +344,7 @@ async def execute_long_order(
             (
                 notification_plot_buff(
                     df=df,
-                    timeframe="1m",
+                    timeframe=timeframe,
                     symbol=symbol,
                     entry_price=current_price,
                 ),
@@ -348,6 +365,7 @@ async def execute_long_order(
 
 async def execute_short_order(
     symbol: str,
+    timeframe: str,
     df: pd.DataFrame,
     amountByUSDC: float,
 ) -> None:
@@ -356,7 +374,7 @@ async def execute_short_order(
 
     try:
         # 現在価格を取得
-        ticker = await hyperliquid_exchange.fetch_price_async(f"{symbol}/USDC:USDC")
+        ticker = await hyperliquid_exchange.fetch_price_async(f"{symbol}")
         current_price = ticker["last"]
 
         # 注文数量を計算
@@ -364,7 +382,7 @@ async def execute_short_order(
 
         # ショートオーダー発注
         order_result = await hyperliquid_exchange.create_order_perp_short_async(
-            symbol=f"{symbol}/USDC:USDC",
+            symbol=f"{symbol}",
             amount=amount,
             price=current_price,
         )
@@ -382,7 +400,7 @@ async def execute_short_order(
             order_id=order_result.get("id", "N/A"),
             position_type="SHORT",
             footer="buy_perp.py | hyperliquid",
-            timeframe="1m",
+            timeframe=timeframe,
         )
 
         # グラフ作成
@@ -390,7 +408,7 @@ async def execute_short_order(
             (
                 notification_plot_buff(
                     df=df,
-                    timeframe="1m",
+                    timeframe=timeframe,
                     symbol=symbol,
                     entry_price=current_price,
                 ),
@@ -478,6 +496,9 @@ def notification_plot_buff(
 ) -> BytesIO:
     """グラフを作成し、BytesIOとして返す。"""
     logger.debug(f"Creating plot for {symbol}")
+
+    # 最新の60データポイントのみ使用
+    df = df.tail(60).copy()
 
     fig, ax1 = plt.subplots(1, 1, figsize=(12, 8))
 

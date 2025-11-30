@@ -7,6 +7,7 @@ from loguru import logger
 
 from crypto_spot_collector.apps.import_historical_data import HistoricalDataImporter
 from crypto_spot_collector.exchange.hyperliquid import HyperLiquidExchange
+from crypto_spot_collector.exchange.types import PositionSide
 from crypto_spot_collector.repository.ohlcv_repository import OHLCVRepository
 from crypto_spot_collector.utils.secrets import load_config
 
@@ -187,33 +188,55 @@ async def main() -> None:
     logger.info("Starting WebSocket listener task...")
 
     try:
+        symbol = "XRP/USDC:USDC"
 
-        logger.info("Subscribing to OHLCV WebSocket...")
-        # OHLCVデータを購読（内部でconnectも呼ばれる）
-        await hyperliquid_exchange.subscribe_ohlcv_ws(
+        # テスト用のロング
+        # order = await hyperliquid_exchange.create_order_perp_long_async(
+        #     symbol=symbol,
+        #     amount=10,
+        #     price=2.2
+        # )
+        # logger.info(f"Placed test long order: {order}")
+
+        # # 決済テスト
+        # close_order = await hyperliquid_exchange.close_all_positions_perp_async(
+        #     side=PositionSide.ALL
+        # )
+        # logger.info(f"Closed all positions: {close_order}")
+
+        # テスト用のショート
+        await hyperliquid_exchange.create_order_perp_short_async(
             symbol=symbol,
-            interval="1m",
-            callback=handle_candle
+            amount=10,
+            price=2.196
         )
 
-        # 購読後にリスナーを開始
-        listener_task = asyncio.create_task(
-            hyperliquid_exchange.start_ws_listener())
+        # logger.info("Subscribing to OHLCV WebSocket...")
+        # OHLCVデータを購読（内部でconnectも呼ばれる）
+        # await hyperliquid_exchange.subscribe_ohlcv_ws(
+        #     symbol=symbol,
+        #     interval="1m",
+        #     callback=handle_candle
+        # )
 
-        # リスナーが開始するまで少し待つ
-        await asyncio.sleep(0.5)
+        # # 購読後にリスナーを開始
+        # listener_task = asyncio.create_task(
+        #     hyperliquid_exchange.start_ws_listener())
 
-        logger.info(f"Waiting for {max_candles} candles...")
-        # 指定数のキャンドルを受信するまで待機
-        while candle_count < max_candles:
-            logger.debug(f"Candle count: {candle_count}/{max_candles}")
-            await asyncio.sleep(1)
+        # # リスナーが開始するまで少し待つ
+        # await asyncio.sleep(0.5)
 
-        logger.info(
-            f"Received {candle_count} candles. Unsubscribing and closing connection.")
+        # logger.info(f"Waiting for {max_candles} candles...")
+        # # 指定数のキャンドルを受信するまで待機
+        # while candle_count < max_candles:
+        #     logger.debug(f"Candle count: {candle_count}/{max_candles}")
+        #     await asyncio.sleep(1)
 
-        # 購読解除
-        await hyperliquid_exchange.unsubscribe_ohlcv_ws(symbol=symbol, interval="1m")
+        # logger.info(
+        #     f"Received {candle_count} candles. Unsubscribing and closing connection.")
+
+        # # 購読解除
+        # await hyperliquid_exchange.unsubscribe_ohlcv_ws(symbol=symbol, interval="1m")
 
     except KeyboardInterrupt:
         logger.info("Interrupted by user")
