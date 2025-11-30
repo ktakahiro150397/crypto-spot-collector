@@ -133,10 +133,18 @@ class OHLCVRepository:
         )
 
         if not crypto:
-            raise ValueError(f"Cryptocurrency with symbol '{symbol}' not found")
+            raise ValueError(
+                f"Cryptocurrency with symbol '{symbol}' not found")
 
         # Create interval condition
         interval_condition = self._create_interval_filter(interval)
+
+        from loguru import logger
+        logger.debug(
+            f"get_ohlcv_data query: symbol={symbol}, interval={interval}, "
+            f"from={from_datetime}, to={to_datetime}, "
+            f"interval_condition={interval_condition}"
+        )
 
         # Build query
         query = (
@@ -153,7 +161,10 @@ class OHLCVRepository:
             .order_by(OHLCVData.timestamp_utc)
         )
 
-        return query.all()
+        result = query.all()
+        logger.debug(f"Query returned {len(result)} records")
+
+        return result
 
     def get_latest_ohlcv_data(
         self,
@@ -180,7 +191,8 @@ class OHLCVRepository:
         )
 
         if not crypto:
-            raise ValueError(f"Cryptocurrency with symbol '{symbol}' not found")
+            raise ValueError(
+                f"Cryptocurrency with symbol '{symbol}' not found")
 
         # Build query
         query = (
@@ -225,7 +237,8 @@ class OHLCVRepository:
         )
 
         if not crypto:
-            raise ValueError(f"Cryptocurrency with symbol '{symbol}' not found")
+            raise ValueError(
+                f"Cryptocurrency with symbol '{symbol}' not found")
 
         # Create interval condition
         interval_condition = self._create_interval_filter(interval)
@@ -279,7 +292,8 @@ class OHLCVRepository:
         )
 
         if not crypto:
-            raise ValueError(f"Cryptocurrency with symbol '{symbol}' not found")
+            raise ValueError(
+                f"Cryptocurrency with symbol '{symbol}' not found")
 
         # Get min and max timestamps
         result = (

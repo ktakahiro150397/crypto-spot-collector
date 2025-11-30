@@ -161,22 +161,18 @@ class HyperLiquidExchange(IExchange):
         grouping='normalTpsl'でグループ化します。
         これによりWebUIと同じようにグルーピングされた注文が作成されます。
         """
-        # 現在の市場価格を取得
-        ticker = await self.fetch_price_async(symbol)
-        market_price = float(ticker['last'])
-        logger.debug(f"Market price for {symbol}: {market_price}")
-
-        # 市場価格ベースでROEのTP/SL計算
-        tp_trigger = market_price * (1 + self.take_profit_rate / self.leverage)
-        sl_trigger = market_price * (1 - self.stop_loss_rate / self.leverage)
+        # ROEベースのTP/SL計算
+        tp_trigger = price * (1 + self.take_profit_rate / self.leverage)
+        sl_trigger = price * (1 - self.stop_loss_rate / self.leverage)
 
         result = await self.exchange_private.create_order(
             symbol=symbol,
             type="market",
             side="buy",
             amount=amount,
-            price=market_price,
+            price=price,
             params={
+                # "postOnly": True,
                 "stopLoss": {
                     "type": "market",  # SLはmarketで即座に決済
                     "triggerPrice": sl_trigger,
@@ -189,7 +185,7 @@ class HyperLiquidExchange(IExchange):
         )
 
         logger.info(
-            f"Perpetual long order created for {symbol} at market price {market_price} with amount {amount}. "
+            f"Perpetual long order created for {symbol} at price {price} with amount {amount}. "
             f"TP trigger: {tp_trigger:.4f}, SL trigger: {sl_trigger:.4f}"
         )
 
@@ -203,23 +199,24 @@ class HyperLiquidExchange(IExchange):
     ) -> Any:
         """
         Create a perpetual short order with Take Profit and Stop Loss.
-        """
-        # 現在の市場価格を取得
-        ticker = await self.fetch_price_async(symbol)
-        market_price = float(ticker['last'])
-        logger.debug(f"Market price for {symbol}: {market_price}")
 
-        # 市場価格ベースでROEのTP/SL計算
-        tp_trigger = market_price * (1 - self.take_profit_rate / self.leverage)
-        sl_trigger = market_price * (1 + self.stop_loss_rate / self.leverage)
+        HyperLiquidでは、ショートポジションを開くときは：
+        - side="buy" を使う
+        - amount を負の値にする
+        これがccxtのHyperLiquid実装の仕様です。
+        """
+        # ROEベースのTP/SL計算
+        tp_trigger = price * (1 - self.take_profit_rate / self.leverage)
+        sl_trigger = price * (1 + self.stop_loss_rate / self.leverage)
 
         result = await self.exchange_private.create_order(
             symbol=symbol,
             type="market",
-            side="sell",
-            amount=amount,
-            price=market_price,
+            side="buy",  # ショートでもbuyを使う
+            amount=-amount,  # amountを負の値にする
+            price=price,
             params={
+                # "postOnly": True,
                 "stopLoss": {
                     "type": "market",  # SLはmarketで即座に決済
                     "triggerPrice": sl_trigger,
@@ -232,7 +229,7 @@ class HyperLiquidExchange(IExchange):
         )
 
         logger.info(
-            f"Perpetual short order created for {symbol} at market price {market_price} with amount {amount}. "
+            f"Perpetual short order created for {symbol} at price {price} with amount {amount}. "
             f"TP trigger: {tp_trigger:.4f}, SL trigger: {sl_trigger:.4f}"
         )
 

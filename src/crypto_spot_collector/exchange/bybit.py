@@ -7,7 +7,11 @@ import ccxt.async_support as ccxt_async
 from loguru import logger
 
 from crypto_spot_collector.exchange.interface import IExchange
-from crypto_spot_collector.exchange.types import SpotAsset, SpotOrderResult
+from crypto_spot_collector.exchange.types import (
+    PositionSide,
+    SpotAsset,
+    SpotOrderResult,
+)
 from crypto_spot_collector.repository.trade_data_repository import TradeDataRepository
 
 # bybit.enable_demo_trading(enable=True)
@@ -421,6 +425,13 @@ class BybitExchange(IExchange):
     ) -> Any:
         raise NotImplementedError(
             "create_order_perp_short_async is not yet implemented for Bybit")
+
+    async def close_all_positions_perp_async(
+        self,
+        side: PositionSide = PositionSide.ALL,
+    ) -> list[Any]:
+        raise NotImplementedError(
+            "close_all_positions_perp_async is not yet implemented for Bybit")
 
     def fetch_average_buy_price_spot(self, symbol: str) -> float:
         logger.debug(f"Fetching average buy price for {symbol} spot")
