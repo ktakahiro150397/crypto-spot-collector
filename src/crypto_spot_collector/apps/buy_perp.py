@@ -182,17 +182,31 @@ async def main() -> None:
     amount_by_usdc = secrets["settings"]["perpetual"].get("amountByUSDC", 10.0)
 
     while True:
-        # 次の1分0秒まで待機処理
+        # 次の実行時刻まで待機処理
         now = datetime.now(timezone.utc)
         logger.info(f"Current time: {now}")
 
         run_minute = int(timeframe_perp.replace("m", ""))
 
-        next_run = (now + timedelta(minutes=run_minute, seconds=0)
-                    ).replace(second=0, microsecond=0)
+        # 次の実行時刻を計算（run_minuteの倍数の分に実行）
+        current_minute = now.minute
+        current_second = now.second
+
+        # 次の実行分を計算（run_minuteの倍数）
+        next_minute = ((current_minute // run_minute) + 1) * run_minute
+
+        if next_minute >= 60:
+            # 次の時間に繰り越し
+            next_run = (now + timedelta(hours=1)).replace(minute=0,
+                                                          second=0, microsecond=0)
+        else:
+            # 同じ時間内
+            next_run = now.replace(minute=next_minute, second=0, microsecond=0)
+
         wait_seconds = (next_run - now).total_seconds()
         logger.info(
-            f"Waiting for {wait_seconds} seconds until next run at {next_run} UTC"
+            f"Waiting for {wait_seconds:.1f} seconds until next run at {next_run} UTC "
+            f"(run every {run_minute} minutes: 0, {run_minute}, {run_minute*2}, ...)"
         )
         await asyncio.sleep(wait_seconds)
 
