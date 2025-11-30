@@ -1,6 +1,7 @@
 """Tests for exchange interface."""
 
-from crypto_spot_collector.exchange import IExchange, BybitExchange, SpotAsset, SpotOrderResult
+from crypto_spot_collector.exchange import IExchange, BybitExchange, PositionSide, SpotAsset, SpotOrderResult
+from crypto_spot_collector.exchange.hyperliquid import HyperLiquidExchange
 
 
 def test_bybit_exchange_implements_interface() -> None:
@@ -9,15 +10,29 @@ def test_bybit_exchange_implements_interface() -> None:
         "BybitExchange should implement IExchange"
 
 
+def test_hyperliquid_exchange_implements_interface() -> None:
+    """Test that HyperLiquidExchange implements IExchange interface."""
+    assert issubclass(HyperLiquidExchange, IExchange), \
+        "HyperLiquidExchange should implement IExchange"
+
+
 def test_interface_exports() -> None:
     """Test that all expected types are exported from exchange module."""
     from crypto_spot_collector.exchange import IExchange, BybitExchange
-    from crypto_spot_collector.exchange import SpotAsset, SpotOrderResult
+    from crypto_spot_collector.exchange import PositionSide, SpotAsset, SpotOrderResult
 
     assert IExchange is not None
     assert BybitExchange is not None
+    assert PositionSide is not None
     assert SpotAsset is not None
     assert SpotOrderResult is not None
+
+
+def test_position_side_enum() -> None:
+    """Test PositionSide enum values."""
+    assert PositionSide.LONG.value == "long"
+    assert PositionSide.SHORT.value == "short"
+    assert PositionSide.ALL.value == "all"
 
 
 def test_spot_order_result_dataclass() -> None:

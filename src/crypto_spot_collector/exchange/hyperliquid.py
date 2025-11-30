@@ -8,7 +8,7 @@ from loguru import logger
 
 from crypto_spot_collector.exchange.hyperliquid_ws import HyperLiquidWebSocket
 from crypto_spot_collector.exchange.interface import IExchange
-from crypto_spot_collector.exchange.types import SpotAsset, SpotOrderResult
+from crypto_spot_collector.exchange.types import PositionSide, SpotAsset, SpotOrderResult
 
 
 class HyperLiquidExchange(IExchange):
@@ -279,6 +279,76 @@ class HyperLiquidExchange(IExchange):
             "get_spot_portfolio_async not yet implemented for HyperLiquid")
         raise NotImplementedError(
             "get_spot_portfolio_async is not yet implemented for HyperLiquid")
+
+    async def close_all_positions_perp_async(
+        self,
+        side: PositionSide = PositionSide.ALL,
+    ) -> list[Any]:
+        """Close all perpetual positions with market orders.
+
+        Args:
+            side: The position side to close.
+                - PositionSide.LONG: Close only long positions
+                - PositionSide.SHORT: Close only short positions
+                - PositionSide.ALL: Close all positions (default)
+
+        Returns:
+            List of order results for each closed position.
+        """
+        logger.info(f"Closing all perpetual positions (side: {side.value})")
+
+        # Fetch all positions
+        positions = await self.exchange_private.fetch_positions()
+        logger.debug(f"Fetched {len(positions)} positions")
+
+        results: list[Any] = []
+
+        for position in positions:
+            # Skip positions with zero contracts
+            contracts = float(position.get('contracts', 0))
+            if contracts == 0:
+                continue
+
+            position_side = position.get('side')
+            symbol = position.get('symbol')
+
+            # Filter by side if specified
+            if side == PositionSide.LONG and position_side != 'long':
+                logger.debug(f"Skipping {symbol} (side: {position_side}, filter: long)")
+                continue
+            if side == PositionSide.SHORT and position_side != 'short':
+                logger.debug(f"Skipping {symbol} (side: {position_side}, filter: short)")
+                continue
+
+            # Determine the side for closing order (opposite of position side)
+            close_side = 'sell' if position_side == 'long' else 'buy'
+
+            logger.info(
+                f"Closing position: {symbol}, side: {position_side}, "
+                f"contracts: {contracts}, close_side: {close_side}"
+            )
+
+            try:
+                # Create a market order to close the position
+                result = await self.exchange_private.create_order(
+                    symbol=symbol,
+                    type='market',
+                    side=close_side,
+                    amount=contracts,
+                    params={
+                        'reduceOnly': True,
+                    }
+                )
+                results.append(result)
+                logger.info(
+                    f"Successfully closed position for {symbol}: {result.get('id', 'N/A')}"
+                )
+            except Exception as e:
+                logger.error(f"Failed to close position for {symbol}: {e}")
+                raise
+
+        logger.info(f"Closed {len(results)} positions")
+        return results
 
     async def subscribe_ohlcv_ws(
         self,
