@@ -175,7 +175,7 @@ class HyperLiquidExchange(IExchange):
 
         result = await self.exchange_private.create_order(
             symbol=symbol,
-            type="limit",
+            type="market",
             side="buy",
             amount=amount,
             price=price,
@@ -211,7 +211,7 @@ class HyperLiquidExchange(IExchange):
 
         result = await self.exchange_private.create_order(
             symbol=symbol,
-            type="limit",
+            type="market",
             side="sell",
             amount=amount,
             price=price,

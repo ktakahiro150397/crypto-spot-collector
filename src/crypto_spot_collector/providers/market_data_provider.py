@@ -46,6 +46,13 @@ class MarketDataProvider:
             sar_config = {"step": 0.02, "max_step": 0.2}
 
         # Fetch data from repository
+        from loguru import logger
+
+        logger.debug(
+            f"Fetching OHLCV data: symbol={symbol}, interval={interval}, "
+            f"from={from_datetime}, to={to_datetime}"
+        )
+
         with OHLCVRepository() as repo:
             data = repo.get_ohlcv_data(
                 symbol=symbol,
@@ -53,6 +60,13 @@ class MarketDataProvider:
                 from_datetime=from_datetime,
                 to_datetime=to_datetime,
             )
+
+            logger.debug(f"Retrieved {len(data)} records from database")
+            if data:
+                logger.debug(
+                    f"First record timestamp: {data[0].timestamp_utc}")
+                logger.debug(
+                    f"Last record timestamp: {data[-1].timestamp_utc}")
 
             # Convert to DataFrame
             df = pd.DataFrame(
