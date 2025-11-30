@@ -19,8 +19,8 @@
         ],
         "perpetual": {
             "leverage": 20,
-            "take_profit_rate": 0.1,
-            "stop_loss_rate": 0.1,
+            "take_profit_rate": 0.03,
+            "stop_loss_rate": 0.03,
             "amountByUSDC": 10.0
         }
     }

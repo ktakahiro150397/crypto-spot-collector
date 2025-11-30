@@ -92,10 +92,10 @@ plt.rcParams["ytick.color"] = "#2C3E50"
 
 # HyperLiquidで取引する永続シンボル
 perp_symbols = [
-    "BTC",
-    "ETH",
+    # "BTC",
+    # "ETH",
     "XRP",
-    "SOL",
+    # "SOL",
 ]
 
 logger.info("Initializing crypto perp collector script")
@@ -158,12 +158,14 @@ async def main() -> None:
     logger.info("Starting buy perp script")
 
     logger.info("---- Settings ----")
-    logger.info(f"Discord Webhook URL: {secrets['discord']['discordWebhookUrl']}")
+    logger.info(
+        f"Discord Webhook URL: {secrets['discord']['discordWebhookUrl']}")
     logger.info(f"Perp Symbols: {perp_symbols}")
     logger.info(
         f"Take Profit Rate: {secrets['settings']['perpetual']['take_profit_rate']}"
     )
-    logger.info(f"Stop Loss Rate: {secrets['settings']['perpetual']['stop_loss_rate']}")
+    logger.info(
+        f"Stop Loss Rate: {secrets['settings']['perpetual']['stop_loss_rate']}")
     logger.info(f"Leverage: {secrets['settings']['perpetual']['leverage']}")
     logger.info("------------------")
 
@@ -174,7 +176,8 @@ async def main() -> None:
         # 次の1分0秒まで待機処理
         now = datetime.now(timezone.utc)
         logger.info(f"Current time: {now}")
-        next_run = (now + timedelta(minutes=1)).replace(second=0, microsecond=0)
+        next_run = (now + timedelta(minutes=1)
+                    ).replace(second=0, microsecond=0)
         wait_seconds = (next_run - now).total_seconds()
         logger.info(
             f"Waiting for {wait_seconds} seconds until next run at {next_run} UTC"
@@ -201,7 +204,7 @@ async def main() -> None:
                 )
 
                 # OHLCVデータの登録
-                importer.register_data(symbol.upper(), ohlcv)
+                importer.register_data(f"{symbol.upper()}_hl_perp", ohlcv)
                 logger.debug(f"Registered OHLCV data for {symbol.upper()}")
 
                 # シグナルチェック
@@ -247,7 +250,8 @@ async def check_signal(
     long_signal = should_long(df)
     short_signal = should_short(df)
 
-    logger.info(f"{symbol}: Long Signal: {long_signal}, Short Signal: {short_signal}")
+    logger.info(
+        f"{symbol}: Long Signal: {long_signal}, Short Signal: {short_signal}")
 
     if long_signal:
         await execute_long_order(
