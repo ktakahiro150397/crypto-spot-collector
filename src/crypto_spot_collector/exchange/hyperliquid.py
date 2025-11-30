@@ -304,8 +304,12 @@ class HyperLiquidExchange(IExchange):
         results: list[Any] = []
 
         for position in positions:
-            # Skip positions with zero contracts
-            contracts = float(position.get('contracts', 0))
+            # Skip positions with zero or missing contracts
+            contracts_raw = position.get('contracts')
+            if contracts_raw is None:
+                logger.debug(f"Skipping position with missing contracts: {position}")
+                continue
+            contracts = float(contracts_raw)
             if contracts == 0:
                 continue
 
@@ -321,7 +325,15 @@ class HyperLiquidExchange(IExchange):
                 continue
 
             # Determine the side for closing order (opposite of position side)
-            close_side = 'sell' if position_side == 'long' else 'buy'
+            if position_side == 'long':
+                close_side = 'sell'
+            elif position_side == 'short':
+                close_side = 'buy'
+            else:
+                logger.warning(
+                    f"Unexpected position side '{position_side}' for {symbol}, skipping"
+                )
+                continue
 
             logger.info(
                 f"Closing position: {symbol}, side: {position_side}, "
