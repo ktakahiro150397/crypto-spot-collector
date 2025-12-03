@@ -123,6 +123,10 @@ logger.info("HyperLiquid exchange client initialized")
 sar_checker = SARChecker(
     consecutive_count=secrets["settings"]["perpetual"]["consecutivePositiveCount"])
 
+# SAR direction tracking per symbol
+# Key: symbol (e.g., "XRP/USDC:USDC"), Value: SAR direction ("long", "short", or None)
+sar_direction_tracker: dict[str, str | None] = {}
+
 
 def should_long(df: pd.DataFrame) -> bool:
     """
@@ -282,18 +286,45 @@ async def check_signal(
         logger.warning(f"No data available for {symbol}")
         return
 
-    # ロング/ショート判断
+    # Check for SAR direction switch (to close existing positions)
+    previous_sar_direction = sar_direction_tracker.get(symbol)
+    sar_switched, current_sar_direction = sar_checker.check_sar_direction_switch(
+        df, previous_sar_direction
+    )
+
+    # Update the tracker with current direction
+    sar_direction_tracker[symbol] = current_sar_direction
+
+    logger.info(
+        f"{symbol}: SAR direction - Previous: {previous_sar_direction}, "
+        f"Current: {current_sar_direction}, Switched: {sar_switched}"
+    )
+
+    # If SAR direction switched, close all positions
+    if sar_switched:
+        logger.info(
+            f"{symbol}: SAR direction switched from {previous_sar_direction} "
+            f"to {current_sar_direction}. Closing all positions."
+        )
+        closed_positions = await hyperliquid_exchange.close_all_positions_perp_async(
+            side=PositionSide.ALL
+        )
+
+        # Send Discord notification for closed positions
+        if closed_positions:
+            await send_close_position_notification(
+                symbol=symbol,
+                closed_positions=closed_positions,
+                reason=f"SAR direction switch: {previous_sar_direction} → {current_sar_direction}",
+                timeframe=timeframe,
+            )
+
+    # Check for new entry signals
     long_signal = should_long(df)
     short_signal = should_short(df)
 
     logger.info(
         f"{symbol}: Long Signal: {long_signal}, Short Signal: {short_signal}")
-
-    if long_signal or short_signal:
-        # いずれかのシグナルがTrueの場合、既存のポジションはクローズする
-        await hyperliquid_exchange.close_all_positions_perp_async(
-            side=PositionSide.ALL
-        )
 
     if long_signal:
         await execute_long_order(
@@ -500,6 +531,87 @@ def embed_object_create_helper_perp(
         },
     }
     return embed
+
+
+async def send_close_position_notification(
+    symbol: str,
+    closed_positions: list[dict],
+    reason: str,
+    timeframe: str,
+) -> None:
+    """ポジションクローズ時のDiscord通知を送信する。"""
+    try:
+        logger.info(f"Sending close position notification for {symbol}")
+
+        # 残高を取得
+        free_usdc = await hyperliquid_exchange.fetch_free_usdt_async()
+
+        # クローズされたポジションの情報を集約
+        total_contracts = 0.0
+        position_details = []
+
+        for pos in closed_positions:
+            contracts = pos.get("amount", 0.0)
+            total_contracts += contracts
+
+            # ポジション詳細を追加
+            side = pos.get("side", "N/A")
+            price = pos.get("price", 0.0)
+            order_id = pos.get("id", "N/A")
+
+            position_details.append({
+                "side": side,
+                "contracts": contracts,
+                "price": price,
+                "order_id": order_id,
+            })
+
+        # Embed作成
+        embed = {
+            "title": f":octagonal_sign: ({timeframe}) {symbol} ポジションをクローズしました",
+            "color": 16776960,  # 黄色
+            "fields": [
+                {
+                    "name": "クローズ理由",
+                    "value": f"`{reason}`",
+                    "inline": False,
+                },
+                {
+                    "name": "クローズしたポジション数",
+                    "value": f"`{len(closed_positions)}`",
+                    "inline": True,
+                },
+                {
+                    "name": "残りUSDC",
+                    "value": f"`{free_usdc}`",
+                    "inline": True,
+                },
+            ],
+            "footer": {
+                "text": "buy_perp.py | hyperliquid",
+            },
+        }
+
+        # 各ポジションの詳細を追加
+        for i, detail in enumerate(position_details, 1):
+            embed["fields"].append({
+                "name": f"Position #{i} - {detail['side'].upper()}",
+                "value": (
+                    f"数量: `{detail['contracts']}`\n"
+                    f"価格: `{detail['price']}`\n"
+                    f"Order ID: `{detail['order_id']}`"
+                ),
+                "inline": True,
+            })
+
+        await notificator.send_notification_embed_with_file(
+            message="", embeds=[embed], image_buffers=[]
+        )
+        logger.info(f"Close position notification sent for {symbol}")
+
+    except Exception as e:
+        logger.error(
+            f"Error sending close position notification for {symbol}: {e}")
 
 
 def notification_plot_buff(
