@@ -129,39 +129,145 @@ sar_checker = SARChecker(
 sar_direction_tracker: dict[str, str | None] = {}
 
 
-def should_long(df: pd.DataFrame) -> bool:
+def check_price_change_signal(
+    df: pd.DataFrame, threshold_percent: float
+) -> tuple[bool, bool, float, str]:
     """
-    ロング（買い）シグナルを判断するプレースホルダ関数。
+    最新2つのローソク足から価格変動率を計算し、ロング・ショートシグナルを判断する。
+
+    Args:
+        df: OHLCVデータを含むDataFrame
+        threshold_percent: 判断基準となる価格変動率（%）
+
+    Returns:
+        tuple: (is_long_signal, is_short_signal, price_change_percent, reason)
+            - is_long_signal: ロングシグナルの有無
+            - is_short_signal: ショートシグナルの有無
+            - price_change_percent: 実際の価格変動率（%）
+            - reason: 判断理由の説明文
+    """
+    if len(df) < 2:
+        return False, False, 0.0, "Not enough data"
+
+    # 最新2つのローソク足を取得
+    prev_candle = df.iloc[-2]
+    latest_candle = df.iloc[-1]
+
+    # 1つ前の足のopenと最新のcloseの価格差を計算
+    prev_open = prev_candle["open"]
+    latest_close = latest_candle["close"]
+
+    # 価格変動率を計算（%）
+    price_change_percent = ((latest_close - prev_open) / prev_open) * 100
+
+    # 判断ロジック
+    is_long_signal = price_change_percent >= threshold_percent
+    is_short_signal = price_change_percent <= -threshold_percent
+
+    # 理由を作成
+    if is_long_signal:
+        reason = (
+            f"Price increased {price_change_percent:.2f}% "
+            f"(from {prev_open:.2f} to {latest_close:.2f}), "
+            f"threshold: {threshold_percent}%"
+        )
+    elif is_short_signal:
+        reason = (
+            f"Price decreased {abs(price_change_percent):.2f}% "
+            f"(from {prev_open:.2f} to {latest_close:.2f}), "
+            f"threshold: {threshold_percent}%"
+        )
+    else:
+        reason = (
+            f"Price change {price_change_percent:.2f}% "
+            f"is within threshold ±{threshold_percent}%"
+        )
+
+    logger.debug(
+        f"Price change analysis: {price_change_percent:.2f}% "
+        f"(prev_open: {prev_open}, latest_close: {latest_close}), "
+        f"Long: {is_long_signal}, Short: {is_short_signal}"
+    )
+
+    return is_long_signal, is_short_signal, price_change_percent, reason
+
+
+def should_long(df: pd.DataFrame, threshold_percent: float) -> tuple[bool, str]:
+    """
+    ロング（買い）シグナルを判断する関数。
+    SARシグナルまたは価格変動率シグナルのいずれかを満たす場合にロング。
 
     Args:
         df: OHLCVデータを含むDataFrame（インジケーター付き）
+        threshold_percent: 価格変動率の判断基準（%）
 
     Returns:
-        True: ロングシグナル発生
-        False: ロングシグナルなし
+        tuple: (is_long_signal, reason)
+            - is_long_signal: ロングシグナルの有無
+            - reason: 判断理由
     """
-
+    # SARシグナルチェック
     is_long_sar = sar_checker.check_long(df)
     logger.info(f"should_long: SAR long signal: {is_long_sar}")
 
-    return is_long_sar
+    # 価格変動率シグナルチェック
+    is_long_price, _, price_change_pct, price_reason = check_price_change_signal(
+        df, threshold_percent
+    )
+    logger.info(f"should_long: Price change long signal: {is_long_price}")
+
+    # いずれかのシグナルが発生した場合にロング
+    is_long = is_long_sar or is_long_price
+
+    # 理由を作成
+    reasons = []
+    if is_long_sar:
+        reasons.append("SAR bullish signal")
+    if is_long_price:
+        reasons.append(price_reason)
+
+    reason = " | ".join(reasons) if reasons else "No long signal"
+
+    return is_long, reason
 
 
-def should_short(df: pd.DataFrame) -> bool:
+def should_short(df: pd.DataFrame, threshold_percent: float) -> tuple[bool, str]:
     """
-    ショート（売り）シグナルを判断するプレースホルダ関数。
+    ショート（売り）シグナルを判断する関数。
+    SARシグナルまたは価格変動率シグナルのいずれかを満たす場合にショート。
 
     Args:
         df: OHLCVデータを含むDataFrame（インジケーター付き）
+        threshold_percent: 価格変動率の判断基準（%）
 
     Returns:
-        True: ショートシグナル発生
-        False: ショートシグナルなし
+        tuple: (is_short_signal, reason)
+            - is_short_signal: ショートシグナルの有無
+            - reason: 判断理由
     """
+    # SARシグナルチェック
     is_short_sar = sar_checker.check_short(df)
-    logger.info(f"should_short: SAR long signal: {is_short_sar}")
+    logger.info(f"should_short: SAR short signal: {is_short_sar}")
 
-    return is_short_sar
+    # 価格変動率シグナルチェック
+    _, is_short_price, price_change_pct, price_reason = check_price_change_signal(
+        df, threshold_percent
+    )
+    logger.info(f"should_short: Price change short signal: {is_short_price}")
+
+    # いずれかのシグナルが発生した場合にショート
+    is_short = is_short_sar or is_short_price
+
+    # 理由を作成
+    reasons = []
+    if is_short_sar:
+        reasons.append("SAR bearish signal")
+    if is_short_price:
+        reasons.append(price_reason)
+
+    reason = " | ".join(reasons) if reasons else "No short signal"
+
+    return is_short, reason
 
 
 async def main() -> None:
@@ -321,11 +427,17 @@ async def check_signal(
             )
 
     # Check for new entry signals
-    long_signal = should_long(df)
-    short_signal = should_short(df)
+    threshold_percent = secrets["settings"]["perpetual"].get(
+        "price_change_threshold_percent", 0.5
+    )
+
+    long_signal, long_reason = should_long(df, threshold_percent)
+    short_signal, short_reason = should_short(df, threshold_percent)
 
     logger.info(
-        f"{symbol}: Long Signal: {long_signal}, Short Signal: {short_signal}")
+        f"{symbol}: Long Signal: {long_signal} ({long_reason}), "
+        f"Short Signal: {short_signal} ({short_reason})"
+    )
 
     if long_signal:
         await execute_long_order(
@@ -333,6 +445,7 @@ async def check_signal(
             timeframe=timeframe,
             df=df,
             amountByUSDC=amountByUSDC,
+            reason=long_reason,
         )
     elif short_signal:
         await execute_short_order(
@@ -340,6 +453,7 @@ async def check_signal(
             timeframe=timeframe,
             df=df,
             amountByUSDC=amountByUSDC,
+            reason=short_reason,
         )
     else:
         logger.debug(f"{symbol}: No signal detected.")
@@ -350,9 +464,11 @@ async def execute_long_order(
     timeframe: str,
     df: pd.DataFrame,
     amountByUSDC: float,
+    reason: str = "",
 ) -> None:
     """ロングオーダーを発注する。"""
     logger.info(f"{symbol}: Long signal detected! Placing long order...")
+    logger.info(f"{symbol}: Reason: {reason}")
 
     try:
         # 現在価格を取得
@@ -383,6 +499,7 @@ async def execute_long_order(
             position_type="LONG",
             footer="buy_perp.py | hyperliquid",
             timeframe=timeframe,
+            reason=reason,
         )
 
         # グラフ作成
@@ -414,9 +531,11 @@ async def execute_short_order(
     timeframe: str,
     df: pd.DataFrame,
     amountByUSDC: float,
+    reason: str = "",
 ) -> None:
     """ショートオーダーを発注する。"""
     logger.info(f"{symbol}: Short signal detected! Placing short order...")
+    logger.info(f"{symbol}: Reason: {reason}")
 
     try:
         # 現在価格を取得
@@ -447,6 +566,7 @@ async def execute_short_order(
             position_type="SHORT",
             footer="buy_perp.py | hyperliquid",
             timeframe=timeframe,
+            reason=reason,
         )
 
         # グラフ作成
@@ -483,6 +603,7 @@ def embed_object_create_helper_perp(
     position_type: str,
     timeframe: str,
     footer: str,
+    reason: str = "",
 ) -> dict:
     """Create a Discord embed object for perp notifications."""
     if position_type == "LONG":
@@ -492,41 +613,54 @@ def embed_object_create_helper_perp(
         title = f":chart_with_downwards_trend: ({timeframe}) {symbol} ショートシグナルを検知しました！"
         color = 15158332  # 赤色
 
+    fields = []
+
+    # 理由フィールドを最初に追加（存在する場合）
+    if reason:
+        fields.append({
+            "name": "🔍 シグナル理由",
+            "value": f"`{reason}`",
+            "inline": False,
+        })
+
+    # その他のフィールドを追加
+    fields.extend([
+        {
+            "name": "ポジションタイプ",
+            "value": f"`{position_type}`",
+            "inline": True,
+        },
+        {
+            "name": "エントリー価格",
+            "value": f"`{price}`",
+            "inline": True,
+        },
+        {
+            "name": f"{symbol} 数量",
+            "value": f"`{amount}`",
+            "inline": True,
+        },
+        {
+            "name": "注文合計金額",
+            "value": f"`{order_value}`",
+            "inline": True,
+        },
+        {
+            "name": "残りUSDC",
+            "value": f"`{freeUsdc}`",
+            "inline": True,
+        },
+        {
+            "name": "オーダーID",
+            "value": f"`{order_id}`",
+            "inline": True,
+        },
+    ])
+
     embed = {
         "title": title,
         "color": color,
-        "fields": [
-            {
-                "name": "ポジションタイプ",
-                "value": f"`{position_type}`",
-                "inline": True,
-            },
-            {
-                "name": "エントリー価格",
-                "value": f"`{price}`",
-                "inline": True,
-            },
-            {
-                "name": f"{symbol} 数量",
-                "value": f"`{amount}`",
-                "inline": True,
-            },
-            {
-                "name": "注文合計金額",
-                "value": f"`{order_value}`",
-                "inline": True,
-            },
-            {
-                "name": "残りUSDC",
-                "value": f"`{freeUsdc}`",
-                "inline": True,
-            },
-            {
-                "name": "オーダーID",
-                "value": f"`{order_id}`",
-                "inline": True,
-            },
-        ],
+        "fields": fields,
         "footer": {
             "text": f"{footer}",
         },

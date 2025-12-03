@@ -3,18 +3,18 @@
         "timeframes": [
             {
                 "timeframe": "4h",
-                "amountBuyUSDT": 2,
-                "consecutivePositiveCount": 6
+                "amountBuyUSDT": 3,
+                "consecutivePositiveCount": 4
             },
             {
                 "timeframe": "2h",
                 "amountBuyUSDT": 1.5,
-                "consecutivePositiveCount": 7
+                "consecutivePositiveCount": 5
             },
             {
                 "timeframe": "1h",
                 "amountBuyUSDT": 1,
-                "consecutivePositiveCount": 8
+                "consecutivePositiveCount": 6
             }
         ],
         "perpetual": {
@@ -23,7 +23,8 @@
             "take_profit_rate": 0.5,
             "stop_loss_rate": 0.5,
             "amountByUSDC": 50.0,
-            "consecutivePositiveCount": 4
+            "consecutivePositiveCount": 4,
+            "price_change_threshold_percent": 0.15
         }
     }
 }
