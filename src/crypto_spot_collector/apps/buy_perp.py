@@ -301,7 +301,7 @@ async def main() -> None:
 
         # 次の実行時刻を計算（run_minuteの倍数の分に実行）
         current_minute = now.minute
-        current_second = now.second
+        # current_second = now.second
 
         # 次の実行分を計算（run_minuteの倍数）
         next_minute = ((current_minute // run_minute) + 1) * run_minute

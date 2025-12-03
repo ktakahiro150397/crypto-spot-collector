@@ -1,7 +1,7 @@
 """Market data provider with technical indicators."""
 
 from datetime import datetime
-from typing import Any, Dict, List, Literal, Optional
+from typing import Dict, List, Literal, Optional
 
 import pandas as pd
 from ta.trend import PSARIndicator
@@ -19,7 +19,7 @@ class MarketDataProvider:
     def get_dataframe_with_indicators(
         self,
         symbol: str,
-        interval: Literal["1m", "5m", "10m", "1h", "2h", "4h", "6h"],
+        interval: Literal["1m", "5m", "10m", "30m", "1h", "2h", "4h", "6h"],
         from_datetime: datetime,
         to_datetime: datetime,
         sma_windows: Optional[List[int]] = None,
