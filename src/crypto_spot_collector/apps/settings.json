@@ -3,26 +3,26 @@
         "timeframes": [
             {
                 "timeframe": "4h",
-                "amountBuyUSDT": 3,
-                "consecutivePositiveCount": 4
+                "amountBuyUSDT": 2,
+                "consecutivePositiveCount": 6
             },
             {
                 "timeframe": "2h",
                 "amountBuyUSDT": 1.5,
-                "consecutivePositiveCount": 5
+                "consecutivePositiveCount": 7
             },
             {
                 "timeframe": "1h",
                 "amountBuyUSDT": 1,
-                "consecutivePositiveCount": 6
+                "consecutivePositiveCount": 8
             }
         ],
         "perpetual": {
-            "timeframe": "5m",
+            "timeframe": "30m",
             "leverage": 20,
-            "take_profit_rate": 0.03,
-            "stop_loss_rate": 0.03,
-            "amountByUSDC": 10.0,
+            "take_profit_rate": 0.5,
+            "stop_loss_rate": 0.5,
+            "amountByUSDC": 50.0,
             "consecutivePositiveCount": 4
         }
     }
