@@ -24,7 +24,7 @@
             "stop_loss_rate": 0.5,
             "amountByUSDC": 50.0,
             "consecutivePositiveCount": 4,
-            "price_change_threshold_percent": 0.15
+            "price_change_threshold_percent": 1.5
         }
     }
 }
