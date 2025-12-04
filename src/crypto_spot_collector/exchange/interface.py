@@ -146,6 +146,11 @@ class IExchange(ABC):
         pass
 
     @abstractmethod
+    async def fetch_positions_perp_async(self) -> list[dict[str, Any]]:
+        """Fetch all perpetual positions asynchronously."""
+        pass
+
+    @abstractmethod
     async def get_current_spot_pnl_async(self, symbol: str) -> float:
         """Get the current spot PnL for a symbol asynchronously."""
         pass

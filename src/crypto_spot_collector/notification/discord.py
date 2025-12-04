@@ -3,6 +3,7 @@ from io import BytesIO, TextIOWrapper
 
 import requests
 
+from crypto_spot_collector.exchange.types import PerpetualPosition
 from crypto_spot_collector.notification.NotificationBase import NotificationBase
 
 
@@ -140,3 +141,62 @@ class discordNotification(NotificationBase):
             }
         }
         return embed
+
+    def embed_object_create_helper_perp_position(positions: list[PerpetualPosition]) -> list[dict]:
+        """Create a Discord embed object for perpetual position notifications."""
+
+        embeds = []
+
+        for position in positions:
+            # Unrealized PnLに応じてcolorを変更
+            if position.unrealized_pnl > 0:
+                color = 3066993  # 緑色
+            elif position.unrealized_pnl < 0:
+                color = 15158332  # 赤色
+            else:
+                color = 3447003  # 青色
+
+            embed = {
+                "title": f"{position.symbol}",
+                "color": color,
+                "fields": [
+                    {
+                        "name": "Side",
+                        "value": f"`{position.side.value}`",
+                        "inline": True
+                    },
+                    {
+                        "name": "Amount",
+                        "value": f"`{position.amount}`",
+                        "inline": True
+                    },
+                    {
+                        "name": "Entry Price",
+                        "value": f"`{position.entry_price}`",
+                        "inline": True
+                    },
+                    # {
+                    #     "name": "Mark Price",
+                    #     "value": f"`{position.mark_price}`",
+                    #     "inline": True
+                    # },
+                    {
+                        "name": "Unrealized PnL",
+                        "value": f"`{position.unrealized_pnl}`",
+                        "inline": True
+                    },
+                    {
+                        "name": "Leverage",
+                        "value": f"`{position.leverage}`",
+                        "inline": True
+                    },
+                    {
+                        "name": "Liquidation Price",
+                        "value": f"`{position.liquidation_price}`",
+                        "inline": True
+                    }
+                ]
+            }
+            embeds.append(embed)
+
+        return embeds

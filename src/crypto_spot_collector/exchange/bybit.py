@@ -936,3 +936,7 @@ class BybitExchange(IExchange):
 
         logger.info("Spot portfolio fetched (async).")
         return portfolio
+
+    async def fetch_positions_perp_async(self) -> list[dict[str, Any]]:
+        raise NotImplementedError(
+            "fetch_positions_perp_async is not yet implemented for Bybit")

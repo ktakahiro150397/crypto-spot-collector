@@ -7,7 +7,9 @@ import discord
 from discord.ext import commands
 from loguru import logger
 
+from crypto_spot_collector.apps.hyperliquid import HyperLiquidExchange
 from crypto_spot_collector.exchange.bybit import BybitExchange
+from crypto_spot_collector.notification.discord import discordNotification
 
 # from crypto_spot_collector.discord.cogs.greet import GreetCog
 from crypto_spot_collector.utils.secrets import load_config
@@ -24,6 +26,14 @@ LOG_DIR.mkdir(exist_ok=True)
 # ログファイル名（日付付き）
 log_file = LOG_DIR / \
     f"discord_application_{datetime.now().strftime('%Y%m%d')}.log"
+
+logger.info("Initializing crypto perp collector script")
+secret_file = Path(__file__).parent / "secrets.json"
+settings_file = Path(__file__).parent / "settings.json"
+secrets = load_config(secret_file, settings_file)
+
+notificator = discordNotification(
+    secrets["discord"]["discordWebhookUrlPerpetual"])
 
 # loguruのログ設定
 # デフォルトのハンドラーを削除
@@ -78,10 +88,20 @@ async def main() -> None:
     bot.bybit_exchange = BybitExchange(   # type: ignore
         apiKey=secrets["bybit"]["apiKey"],
         secret=secrets["bybit"]["secret"]
-    )  # type: ignore
-    bot.version = get_version_from_git()   # type: ignore
+    )
+    bot.hyperliquid_exchange = HyperLiquidExchange(  # type: ignore
+        mainWalletAddress=secrets["hyperliquid"]["mainWalletAddress"],
+        apiWalletAddress=secrets["hyperliquid"]["apiWalletAddress"],
+        privateKey=secrets["hyperliquid"]["privatekey"],
+        take_profit_rate=secrets["settings"]["perpetual"]["take_profit_rate"],
+        stop_loss_rate=secrets["settings"]["perpetual"]["stop_loss_rate"],
+        leverage=secrets["settings"]["perpetual"]["leverage"],
+        testnet=False,
+    )
 
     # await bot.load_extension("crypto_spot_collector.discord.cogs.greet")
+    bot.version = "xxx"
+    await bot.load_extension("crypto_spot_collector.discord.cogs.perp_position")
     await bot.load_extension("crypto_spot_collector.discord.cogs.pnl")
     await bot.load_extension("crypto_spot_collector.discord.cogs.detail")
     await bot.load_extension("crypto_spot_collector.discord.cogs.activity_updater")

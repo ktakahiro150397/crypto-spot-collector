@@ -30,3 +30,22 @@ class SpotAsset:
     total_amount: float  # 総数量
     current_value: float  # 現在価値
     profit_loss: float  # 損益
+
+
+@dataclass
+class PerpetualPosition:
+    """Perpetual position information."""
+    symbol: str
+    side: PositionSide
+    amount: float
+    entry_price: float
+    mark_price: float
+    unrealized_pnl: float
+    leverage: float
+    liquidation_price: float
+
+    def __str__(self) -> str:
+        return (f"PerpetualPosition(symbol={self.symbol}, side={self.side}, "
+                f"amount={self.amount}, entry_price={self.entry_price}, "
+                f"mark_price={self.mark_price}, unrealized_pnl={self.unrealized_pnl}, "
+                f"leverage={self.leverage}, liquidation_price={self.liquidation_price})")

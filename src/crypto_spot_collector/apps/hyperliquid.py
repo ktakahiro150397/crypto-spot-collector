@@ -8,6 +8,7 @@ from loguru import logger
 from crypto_spot_collector.exchange.hyperliquid_ws import HyperLiquidWebSocket
 from crypto_spot_collector.exchange.interface import IExchange
 from crypto_spot_collector.exchange.types import (
+    PerpetualPosition,
     PositionSide,
     SpotAsset,
     SpotOrderResult,
@@ -353,6 +354,37 @@ class HyperLiquidExchange(IExchange):
             "get_spot_portfolio_async not yet implemented for HyperLiquid")
         raise NotImplementedError(
             "get_spot_portfolio_async is not yet implemented for HyperLiquid")
+
+    async def fetch_positions_perp_async(self) -> list[PerpetualPosition]:
+        logger.debug("Fetching all perpetual positions asynchronously")
+        positions = await self.exchange_public.fetch_positions()
+
+        ret = []
+
+        for position in positions:
+            symbol = position.get('symbol')
+            side_str = position.get('side')
+            side = PositionSide.LONG if side_str == 'long' else PositionSide.SHORT
+            amount = float(position.get('contracts', 0))
+            entry_price = float(position.get('entryPrice', 0))
+            mark_price = float(position.get('markPrice') or 0)
+            unrealized_pnl = float(position.get('unrealizedPnl', 0))
+            leverage = float(position.get('leverage', 1))
+            liquidation_price = float(position.get('liquidationPrice', 0))
+
+            perp_position = PerpetualPosition(
+                symbol=symbol,
+                side=side,
+                amount=amount,
+                entry_price=entry_price,
+                mark_price=mark_price,
+                unrealized_pnl=unrealized_pnl,
+                leverage=leverage,
+                liquidation_price=liquidation_price
+            )
+            ret.append(perp_position)
+
+        return ret
 
     async def subscribe_ohlcv_ws(
         self,
