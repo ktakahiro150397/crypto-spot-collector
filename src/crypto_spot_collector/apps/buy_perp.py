@@ -94,10 +94,11 @@ plt.rcParams["ytick.color"] = "#2C3E50"
 
 # HyperLiquidで取引する永続シンボル
 perp_symbols = [
-    # "BTC",
-    # "ETH",
+    "BTC",
+    "ETH",
     "XRP",
-    # "SOL",
+    "SOL",
+    "HYPE",
 ]
 
 logger.info("Initializing crypto perp collector script")
