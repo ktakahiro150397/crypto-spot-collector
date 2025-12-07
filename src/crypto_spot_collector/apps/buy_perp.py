@@ -415,7 +415,8 @@ async def check_signal(
             f"to {current_sar_direction}. Closing all positions."
         )
         closed_positions = await hyperliquid_exchange.close_all_positions_perp_async(
-            side=PositionSide.ALL
+            side=PositionSide.ALL,
+            symbol=symbol,
         )
 
         # Send Discord notification for closed positions

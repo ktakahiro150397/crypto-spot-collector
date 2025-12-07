@@ -42,6 +42,9 @@ class HyperLiquidExchange(IExchange):
         if testnet:
             self.exchange_public.set_sandbox_mode(True)
             self.exchange_private.set_sandbox_mode(True)
+
+            self.exchange_public.verbose = True
+            self.exchange_private.verbose = True
             logger.info("HyperLiquid exchange set to testnet mode")
 
         self.take_profit_rate = take_profit_rate
@@ -112,7 +115,8 @@ class HyperLiquidExchange(IExchange):
             return ticker
         else:
             logger.error(f"Price not found for symbol {symbol}")
-            raise Exception(f"symbol = {symbol} | Price not found in ticker data")
+            raise Exception(
+                f"symbol = {symbol} | Price not found in ticker data")
 
     async def fetch_ohlcv_async(
         self, symbol: str, timeframe: str, fromDate: datetime, toDate: datetime
@@ -139,7 +143,8 @@ class HyperLiquidExchange(IExchange):
         logger.debug("Fetching currency data asynchronously")
         currency: dict[Any, Any] = await self.exchange_public.fetch_currencies()
         if currency:
-            logger.debug(f"Currency data fetched: {len(currency)} currencies (async)")
+            logger.debug(
+                f"Currency data fetched: {len(currency)} currencies (async)")
             return currency
         else:
             logger.error("Currency data not found")
@@ -148,7 +153,8 @@ class HyperLiquidExchange(IExchange):
     async def create_order_spot_async(
         self, amountByUSDT: float, symbol: str
     ) -> tuple[Any, SpotOrderResult]:
-        logger.warning("create_order_spot_async not yet implemented for HyperLiquid")
+        logger.warning(
+            "create_order_spot_async not yet implemented for HyperLiquid")
         raise NotImplementedError(
             "create_order_spot_async is not yet implemented for HyperLiquid"
         )
@@ -259,7 +265,8 @@ class HyperLiquidExchange(IExchange):
             # Skip positions with zero or missing contracts
             contracts_raw = position.get("contracts")
             if contracts_raw is None:
-                logger.debug(f"Skipping position with missing contracts: {position}")
+                logger.debug(
+                    f"Skipping position with missing contracts: {position}")
                 continue
             contracts = float(contracts_raw)
             if contracts == 0:
@@ -270,7 +277,8 @@ class HyperLiquidExchange(IExchange):
 
             # Filter by side if specified
             if side == PositionSide.LONG and position_side != "long":
-                logger.debug(f"Skipping {symbol} (side: {position_side}, filter: long)")
+                logger.debug(
+                    f"Skipping {symbol} (side: {position_side}, filter: long)")
                 continue
             if side == PositionSide.SHORT and position_side != "short":
                 logger.debug(
@@ -327,14 +335,14 @@ class HyperLiquidExchange(IExchange):
     async def fetch_close_orders_all_async(self, symbol: str) -> list[dict[str, Any]]:
         """Fetch all closed orders for a symbol."""
         logger.debug(f"Fetching closed orders for {symbol}")
-        orders = await self.exchange_private.fetch_closed_orders(symbol)
+        orders = await self.exchange_public.fetch_closed_orders(symbol)
         logger.debug(f"Found {len(orders)} closed orders for {symbol}")
         return orders
 
     async def fetch_open_orders_all_async(self, symbol: str) -> list[dict[str, Any]]:
         """Fetch all open orders for a symbol."""
         logger.debug(f"Fetching open orders for {symbol}")
-        orders = await self.exchange_private.fetch_open_orders(symbol)
+        orders = await self.exchange_public.fetch_open_orders(symbol)
         logger.debug(f"Found {len(orders)} open orders for {symbol}")
         return orders
 
@@ -350,9 +358,10 @@ class HyperLiquidExchange(IExchange):
         instead for better performance.
         """
         logger.debug(f"Fetching canceled orders for {symbol}")
-        orders = await self.exchange_private.fetch_orders(symbol)
+        orders = await self.exchange_public.fetch_orders(symbol)
         canceled_orders = [o for o in orders if o.get("status") == "canceled"]
-        logger.debug(f"Found {len(canceled_orders)} canceled orders for {symbol}")
+        logger.debug(
+            f"Found {len(canceled_orders)} canceled orders for {symbol}")
         logger.debug(
             "Note: Fetching all orders and filtering may be inefficient "
             "with large order histories"
@@ -360,13 +369,15 @@ class HyperLiquidExchange(IExchange):
         return canceled_orders
 
     async def get_current_spot_pnl_async(self, symbol: str) -> float:
-        logger.warning("get_current_spot_pnl_async not yet implemented for HyperLiquid")
+        logger.warning(
+            "get_current_spot_pnl_async not yet implemented for HyperLiquid")
         raise NotImplementedError(
             "get_current_spot_pnl_async is not yet implemented for HyperLiquid"
         )
 
     async def get_spot_portfolio_async(self) -> list[SpotAsset]:
-        logger.warning("get_spot_portfolio_async not yet implemented for HyperLiquid")
+        logger.warning(
+            "get_spot_portfolio_async not yet implemented for HyperLiquid")
         raise NotImplementedError(
             "get_spot_portfolio_async is not yet implemented for HyperLiquid"
         )
@@ -381,7 +392,8 @@ class HyperLiquidExchange(IExchange):
             List of position dictionaries with information about open positions.
         """
         logger.debug("Fetching all open positions")
-        positions = await self.exchange_private.fetch_positions()
+
+        positions = await self.exchange_public.fetch_positions()
         # Filter out positions with zero contracts
         open_positions = [
             p
@@ -418,17 +430,62 @@ class HyperLiquidExchange(IExchange):
         )
 
         try:
-            result = await self.exchange_private.edit_order(
-                id=order_id,
+            result = await self.exchange_private.create_order(
                 symbol=symbol,
                 type="market",
-                side=None,  # Side is not changed
-                amount=None,  # Amount is not changed
-                price=None,
+                side="sell",
+                price=new_trigger_price,
+                amount=0,
                 params={
-                    "triggerPrice": new_trigger_price,
-                },
+                    "reduceOnly": True,
+                    "grouping": "positionTpsl"
+                }
             )
+
+            # request = {
+            #     "grouping": "positionTpsl",
+            #     "type": "order",
+            #     "orders": [
+            #         {
+            #             "a": 4,
+            #             "b": False,
+            #             "p": new_trigger_price,
+            #             "r": True,
+            #             "s": "0",
+            #             "t": {
+            #                 "trigger": {
+            #                     "isMarket": True,
+            #                     "tpsl": "sl",
+            #                     "triggerPx": new_trigger_price
+            #                 }
+            #             }
+            #         }
+            #     ]
+            # }
+
+            # result = await self.exchange_private.private_post_exchange(
+            #     params=request
+            # )
+
+            # result = await self.exchange_private.edit_order(
+            #     id=order_id,
+            #     symbol=symbol,
+            #     type="trigger",
+            #     side="sell",
+            #     amount=0.01,
+            #     price=new_trigger_price,
+            #     params={
+            #         "stopLossPrice": new_trigger_price,
+            #         # "stopLoss": {
+            #         #     "type": "market",  # SLはmarketで即座に決済
+            #         #     "triggerPrice": 2900,
+            #         # },
+            #         # "takeProfit": {
+            #         #     "type": "market",  # TPもmarketで即座に決済
+            #         #     "triggerPrice": 3200,
+            #         # },
+            #     },
+            # )
             logger.info(f"Successfully modified stop loss order {order_id}")
             return result
         except Exception as e:
@@ -462,12 +519,38 @@ class HyperLiquidExchange(IExchange):
             logger.error(f"Failed to cancel order {order_id}: {e}")
             raise
 
-    async def create_stop_loss_order_async(
+    async def cancel_orders_async(
+        self,
+        order_ids: list[str],
+        symbol: str,
+    ) -> Any:
+        """
+        Cancel an existing order.
+
+        Args:
+            order_id: The ID of the order to cancel
+            symbol: Trading symbol
+
+        Returns:
+            Canceled order result
+        """
+        logger.info(f"Canceling order {order_ids} for {symbol}")
+        try:
+            result = await self.exchange_private.cancel_orders(
+                ids=order_ids,
+                symbol=symbol,
+            )
+            logger.info(f"Successfully canceled order {order_ids}")
+            return result
+        except Exception as e:
+            logger.error(f"Failed to cancel order {order_ids}: {e}")
+            raise
+
+    async def create_take_profit_stop_loss_order_async(
         self,
         symbol: str,
-        side: str,
-        amount: float,
-        trigger_price: float,
+        sl_trigger_price: float,
+        tp_trigger_price: float,
     ) -> Any:
         """
         Create a standalone stop loss order.
@@ -482,27 +565,40 @@ class HyperLiquidExchange(IExchange):
             Created order result
         """
         logger.info(
-            f"Creating stop loss order for {symbol}: "
-            f"side={side}, amount={amount}, trigger={trigger_price:.4f}"
+            f"Creating TP/SL order for {symbol}: "
+            f"sl_trigger_price={sl_trigger_price:.4f} , tp_trigger_price={tp_trigger_price:.4f}"
         )
 
-        result = await self.exchange_private.create_order(
-            symbol=symbol,
-            type="market",
-            side=side,
-            amount=amount,
-            price=None,
-            params={
-                "stopLoss": {
+        results = await self.exchange_private.create_orders(
+            [
+                {
+                    "symbol": symbol,
                     "type": "market",
-                    "triggerPrice": trigger_price,
+                    "side": "sell",
+                    "amount": 0,
+                    "price": sl_trigger_price,
+                    "params": {
+                        "stopLossPrice": sl_trigger_price,
+                        "reduceOnly": True,
+                    }
                 },
-                "reduceOnly": True,
-            },
+                {
+                    "symbol": symbol,
+                    "type": "market",
+                    "side": "sell",
+                    "amount": 0,
+                    "price": tp_trigger_price,
+                    "params": {
+                        "takeProfitPrice": tp_trigger_price,
+                        "reduceOnly": True,
+                    }
+                },
+            ]
         )
 
-        logger.info(f"Successfully created stop loss order: {result.get('id', 'N/A')}")
-        return result
+        logger.info(
+            f"Successfully created stop loss order: {results}")
+        return results
 
     # ===== WebSocket Methods =====
 

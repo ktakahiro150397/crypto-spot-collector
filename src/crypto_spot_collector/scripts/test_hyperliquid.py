@@ -1,11 +1,44 @@
-import pandas as pd
-from matplotlib import pyplot as plt
+import asyncio
+import sys
+from datetime import datetime
+from pathlib import Path
 
-from crypto_spot_collector.apps.hyperliquid import HyperLiquidExchange
-from crypto_spot_collector.exchange.bybit import BybitExchange
-from crypto_spot_collector.exchange.types import PositionSide
+from loguru import logger
+
+from crypto_spot_collector.exchange.hyperliquid import HyperLiquidExchange
 from crypto_spot_collector.utils.secrets import load_config
-from crypto_spot_collector.utils.trade_data import get_current_pnl_from_db
+
+# ログ設定
+# ログフォルダのパスを取得（プロジェクトルート/logs）
+LOG_DIR = Path(__file__).parent / "logs"
+LOG_DIR.mkdir(exist_ok=True)
+
+# ログファイル名（日付付き）
+log_file = LOG_DIR / \
+    f"hyperliquid_test_{datetime.now().strftime('%Y%m%d')}.log"
+
+# loguruのログ設定
+# デフォルトのハンドラーを削除
+logger.remove()
+
+# 標準出力にログを表示（INFOレベル以上、docker logsで確認可能）
+logger.add(
+    sink=sys.stdout,
+    format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> | <cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> - <level>{message}</level>",
+    level="DEBUG",
+    colorize=True,
+)
+
+# ファイルにログを保存（DEBUGレベル以上、日次ローテーション）
+logger.add(
+    sink=log_file,
+    format="{time:YYYY-MM-DD HH:mm:ss} | {level: <8} | {name}:{function}:{line} - {message}",
+    level="DEBUG",
+    rotation="00:00",  # 毎日0時にローテーション
+    retention="30 days",  # 30日間保持
+    compression="zip",  # 古いログファイルをzip圧縮
+    encoding="utf-8",
+)
 
 
 async def main() -> None:
@@ -26,34 +59,47 @@ async def main() -> None:
         testnet=True,
     )
 
-    # balance = await hyperliquid_exchange.fetch_balance_async()
-
-    # print("Balance:", balance)
-
-    # result = await hyperliquid_exchange.create_order_perp_long_async(
-    #     symbol="ETH/USDC:USDC",
-    #     amount=0.01,
-    #     price=3000,
-    # )
-    # result = await hyperliquid_exchange.create_order_perp_long_async(
-    #     symbol="SOL/USDC:USDC",
-    #     amount=5,
-    #     price=130,
-    # )
-    # result = await hyperliquid_exchange.create_order_perp_long_async(
-    #     symbol="BTC/USDC:USDC",
-    #     amount=0.001,
-    #     price=89000,
-    # )
-
-    # print("Order Result:", result)
-
-    # 持っているポジションを決済
-    close_result = await hyperliquid_exchange.close_all_positions_perp_async(
-        side=PositionSide.LONG,
+    # ロング作成
+    result = await hyperliquid_exchange.create_order_perp_long_async(
+        symbol="ETH/USDC:USDC",
+        amount=0.01,
+        price=3000,
     )
-    print("Close Position Result:", close_result)
+    print("Order Result:", result)
+
+    # TP/SLのID・価格を取得
+    current_orders = await hyperliquid_exchange.fetch_open_orders_all_async(
+        symbol="ETH/USDC:USDC",
+    )
+    print("Current Orders:", current_orders)
+
+    stop_loss_orders = [
+        order for order in current_orders if order.get("info", {}).get("orderType") == "Stop Market"
+    ]
+    print("Current Stop Loss Orders:", stop_loss_orders)
+    take_profit_orders = [
+        order for order in current_orders if order.get("info", {}).get("orderType") == "Take Profit Market"
+    ]
+    print("Current Take Profit Orders:", take_profit_orders)
+
+    stoploss_order_id = stop_loss_orders[0].get("id", "")
+    stoploss_trigger_price = stop_loss_orders[0].get("triggerPrice", 0)
+    takeprofit_order_id = take_profit_orders[0].get("id", "")
+    takeprofit_trigger_price = take_profit_orders[0].get("triggerPrice", 0)
+
+    # SL/TPのキャンセルと再作成
+    cancel_result = await hyperliquid_exchange.cancel_orders_async(
+        order_ids=[stoploss_order_id, takeprofit_order_id],
+        symbol="ETH/USDC:USDC",
+    )
+    print("Cancel SL Result:", cancel_result)
+
+    create_sl_result = await hyperliquid_exchange.create_take_profit_stop_loss_order_async(
+        symbol="ETH/USDC:USDC",
+        sl_trigger_price=stoploss_trigger_price - 100,
+        tp_trigger_price=takeprofit_trigger_price + 100,
+    )
+    print("Create SL Result:", create_sl_result)
 
 if __name__ == "__main__":
-    import asyncio
     asyncio.run(main())
