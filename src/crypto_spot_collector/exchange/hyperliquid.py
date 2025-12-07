@@ -246,6 +246,7 @@ class HyperLiquidExchange(IExchange):
     async def close_all_positions_perp_async(
         self,
         side: PositionSide = PositionSide.ALL,
+        close_symbol: Optional[str] = None,
     ) -> list[Any]:
         logger.info(f"Closing all perpetual positions (side: {side.value})")
 
@@ -268,6 +269,11 @@ class HyperLiquidExchange(IExchange):
 
             position_side = position.get('side')
             symbol = position.get('symbol')
+
+            if close_symbol is not None and symbol != close_symbol:
+                logger.debug(
+                    f"Skipping {symbol} (filter symbol: {close_symbol})")
+                continue
 
             # Filter by side if specified
             if side == PositionSide.LONG and position_side != 'long':
@@ -296,12 +302,17 @@ class HyperLiquidExchange(IExchange):
             )
 
             try:
+                # Get current price for calculate slippage in Hyperliquid
+                price = await self.fetch_price_async(symbol)
+                current_price = price['last']
+
                 # Create a market order to close the position
                 result = await self.exchange_private.create_order(
                     symbol=symbol,
                     type='market',
                     side=close_side,
                     amount=contracts,
+                    price=current_price,
                     params={
                         'reduceOnly': True,
                     }
