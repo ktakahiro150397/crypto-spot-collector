@@ -16,7 +16,9 @@ class PositionTrailingStop:
     highest_price: float  # For long positions
     lowest_price: float  # For short positions
     acceleration_factor: float
-    current_sl_order_id: Optional[str] = None
+
+    current_sl_order_id: str
+    current_tp_order_id: Optional[str] = None
 
 
 class TrailingStopManager:
@@ -56,7 +58,8 @@ class TrailingStopManager:
         symbol: str,
         side: str,
         entry_price: float,
-        sl_order_id: Optional[str] = None,
+        sl_order_id: str,
+        tp_order_id: Optional[str] = None,
     ) -> None:
         """
         Add a new position to track.
@@ -75,9 +78,11 @@ class TrailingStopManager:
             lowest_price=entry_price,
             acceleration_factor=self.initial_af,
             current_sl_order_id=sl_order_id,
+            current_tp_order_id=tp_order_id,
         )
         self.positions[symbol] = position
-        logger.info(f"Added position for tracking: {symbol} {side} @ {entry_price}")
+        logger.info(
+            f"Added position for tracking: {symbol} {side} @ {entry_price}")
 
     def remove_position(self, symbol: str) -> None:
         """Remove a position from tracking."""
