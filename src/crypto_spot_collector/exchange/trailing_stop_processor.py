@@ -220,37 +220,26 @@ class TrailingStopProcessor:
             else:
                 order_side = "buy"
 
-            # Try to modify existing order first
+            # Cancel existing order and create new one
+            # Note: Using cancel-and-recreate approach as it's more reliable
+            # than trying to modify trigger orders, which may not be supported
+            # TODO: Once HyperLiquid API support for modifying trigger orders
+            # is confirmed, can optimize to use modify instead of cancel+create
             if position.current_sl_order_id:
                 try:
                     logger.info(
-                        f"Attempting to modify SL order {position.current_sl_order_id} "
+                        f"Canceling existing SL order {position.current_sl_order_id} "
                         f"for {position.symbol}"
                     )
-                    # TODO: Verify if HyperLiquid supports modifying stop loss orders
-                    # If not supported, we need to cancel and create new
-                    await self.exchange.modify_stop_loss_order_async(
+                    await self.exchange.cancel_order_async(
                         order_id=position.current_sl_order_id,
                         symbol=position.symbol,
-                        new_trigger_price=new_sl_price,
                     )
-                    logger.info(
-                        f"Successfully modified SL order for {position.symbol} "
-                        f"to {new_sl_price:.4f}"
-                    )
-                    return
-                except Exception as e:
+                except Exception as cancel_error:
                     logger.warning(
-                        f"Failed to modify SL order, will cancel and recreate: {e}"
+                        f"Failed to cancel old SL order (may already be filled): "
+                        f"{cancel_error}"
                     )
-                    # Cancel the old order
-                    try:
-                        await self.exchange.cancel_order_async(
-                            order_id=position.current_sl_order_id,
-                            symbol=position.symbol,
-                        )
-                    except Exception as cancel_error:
-                        logger.error(f"Failed to cancel old SL order: {cancel_error}")
 
             # Create new stop loss order
             logger.info(

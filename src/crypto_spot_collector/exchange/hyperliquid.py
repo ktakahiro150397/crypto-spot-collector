@@ -341,13 +341,22 @@ class HyperLiquidExchange(IExchange):
     async def fetch_canceled_orders_all_async(
         self, symbol: str
     ) -> list[dict[str, Any]]:
-        """Fetch all canceled orders for a symbol."""
+        """Fetch all canceled orders for a symbol.
+
+        Note: This implementation fetches all orders and filters by status,
+        which may be inefficient with large order histories.
+        TODO: Verify if HyperLiquid API supports fetching canceled orders
+        separately via a dedicated endpoint. If available, use that endpoint
+        instead for better performance.
+        """
         logger.debug(f"Fetching canceled orders for {symbol}")
-        # TODO: Verify if HyperLiquid API supports fetching canceled orders separately
-        # For now, fetch all orders and filter by status
         orders = await self.exchange_private.fetch_orders(symbol)
         canceled_orders = [o for o in orders if o.get("status") == "canceled"]
         logger.debug(f"Found {len(canceled_orders)} canceled orders for {symbol}")
+        logger.debug(
+            "Note: Fetching all orders and filtering may be inefficient "
+            "with large order histories"
+        )
         return canceled_orders
 
     async def get_current_spot_pnl_async(self, symbol: str) -> float:

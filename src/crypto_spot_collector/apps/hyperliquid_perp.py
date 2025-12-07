@@ -120,9 +120,7 @@ def handle_candle(candles: Any) -> None:
     for candle in candles if isinstance(candles, list) else [candles]:
         # candle_count += 1
 
-        logger.info(
-            f"t : {candle.get('t')}" f"T : {candle.get('T')}" f"o : {candle.get('o')}"
-        )
+        logger.info(f"t: {candle.get('t')}, T: {candle.get('T')}, o: {candle.get('o')}")
 
         ohlvc_data = [
             candle.get("t"),  # ミリ秒のまま渡す（register_data内で変換される）
