@@ -15,23 +15,29 @@ from crypto_spot_collector.exchange.types import (
 
 
 class HyperLiquidExchange(IExchange):
-    def __init__(self,
-                 mainWalletAddress: str,
-                 apiWalletAddress: str,
-                 privateKey: str,
-                 take_profit_rate: float,
-                 stop_loss_rate: float,
-                 leverage: int,
-                 testnet: bool = False,) -> None:
+    def __init__(
+        self,
+        mainWalletAddress: str,
+        apiWalletAddress: str,
+        privateKey: str,
+        take_profit_rate: float,
+        stop_loss_rate: float,
+        leverage: int,
+        testnet: bool = False,
+    ) -> None:
         logger.info("Initializing HyperLiquid exchange client")
-        self.exchange_public = ccxt_async.hyperliquid({
-            "walletAddress": mainWalletAddress,
-        })
+        self.exchange_public = ccxt_async.hyperliquid(
+            {
+                "walletAddress": mainWalletAddress,
+            }
+        )
 
-        self.exchange_private = ccxt_async.hyperliquid({
-            "walletAddress": apiWalletAddress,
-            "privateKey": privateKey,
-        })
+        self.exchange_private = ccxt_async.hyperliquid(
+            {
+                "walletAddress": apiWalletAddress,
+                "privateKey": privateKey,
+            }
+        )
 
         if testnet:
             self.exchange_public.set_sandbox_mode(True)
@@ -62,7 +68,7 @@ class HyperLiquidExchange(IExchange):
         self,
         exc_type: Optional[type[BaseException]],
         exc_val: Optional[BaseException],
-        exc_tb: Optional[TracebackType]
+        exc_tb: Optional[TracebackType],
     ) -> bool:
         """Async context manager exit - automatically closes resources"""
         logger.debug("Exiting HyperLiquidExchange async context")
@@ -72,13 +78,13 @@ class HyperLiquidExchange(IExchange):
     async def close(self) -> None:
         """Explicitly close all exchange connections"""
         logger.info("Closing HyperLiquid exchange connections")
-        if hasattr(self, 'exchange_public') and self.exchange_public:
+        if hasattr(self, "exchange_public") and self.exchange_public:
             await self.exchange_public.close()
             logger.debug("Public exchange connection closed")
-        if hasattr(self, 'exchange_private') and self.exchange_private:
+        if hasattr(self, "exchange_private") and self.exchange_private:
             await self.exchange_private.close()
             logger.debug("Private exchange connection closed")
-        if hasattr(self, 'ws_client') and self.ws_client:
+        if hasattr(self, "ws_client") and self.ws_client:
             await self.ws_client.disconnect()
             logger.debug("WebSocket connection closed")
         logger.info("All HyperLiquid exchange connections closed successfully")
@@ -101,32 +107,29 @@ class HyperLiquidExchange(IExchange):
     async def fetch_price_async(self, symbol: str) -> dict[Any, Any]:
         logger.debug(f"Fetching price for {symbol} asynchronously")
         ticker: dict[Any, Any] = await self.exchange_public.fetch_ticker(symbol)
-        if 'last' in ticker:
+        if "last" in ticker:
             logger.debug(f"Price for {symbol}: {ticker['last']} (async)")
             return ticker
         else:
             logger.error(f"Price not found for symbol {symbol}")
-            raise Exception(
-                f"symbol = {symbol} | Price not found in ticker data")
+            raise Exception(f"symbol = {symbol} | Price not found in ticker data")
 
     async def fetch_ohlcv_async(
-        self,
-        symbol: str,
-        timeframe: str,
-        fromDate: datetime,
-        toDate: datetime
+        self, symbol: str, timeframe: str, fromDate: datetime, toDate: datetime
     ) -> dict[Any, Any]:
         logger.debug(
-            f"Fetching OHLCV data for {symbol} asynchronously from {fromDate} to {toDate} with timeframe {timeframe}")
+            f"Fetching OHLCV data for {symbol} asynchronously from {fromDate} to {toDate} with timeframe {timeframe}"
+        )
         ohlcv: dict[Any, Any] = await self.exchange_public.fetch_ohlcv(
             symbol,
             timeframe=timeframe,
             since=int(fromDate.timestamp() * 1000),
-            limit=None
+            limit=None,
         )
         if ohlcv:
             logger.debug(
-                f"OHLCV data fetched for {symbol}: {len(ohlcv)} records (async)")
+                f"OHLCV data fetched for {symbol}: {len(ohlcv)} records (async)"
+            )
             return ohlcv
         else:
             logger.error(f"OHLCV data not found for symbol {symbol}")
@@ -136,22 +139,19 @@ class HyperLiquidExchange(IExchange):
         logger.debug("Fetching currency data asynchronously")
         currency: dict[Any, Any] = await self.exchange_public.fetch_currencies()
         if currency:
-            logger.debug(
-                f"Currency data fetched: {len(currency)} currencies (async)")
+            logger.debug(f"Currency data fetched: {len(currency)} currencies (async)")
             return currency
         else:
             logger.error("Currency data not found")
             raise Exception("Currency data not found")
 
     async def create_order_spot_async(
-        self,
-        amountByUSDT: float,
-        symbol: str
+        self, amountByUSDT: float, symbol: str
     ) -> tuple[Any, SpotOrderResult]:
-        logger.warning(
-            "create_order_spot_async not yet implemented for HyperLiquid")
+        logger.warning("create_order_spot_async not yet implemented for HyperLiquid")
         raise NotImplementedError(
-            "create_order_spot_async is not yet implemented for HyperLiquid")
+            "create_order_spot_async is not yet implemented for HyperLiquid"
+        )
 
     async def create_order_perp_long_async(
         self,
@@ -168,7 +168,7 @@ class HyperLiquidExchange(IExchange):
         """
         # 現在の市場価格を取得
         ticker = await self.fetch_price_async(symbol)
-        market_price = float(ticker['last'])
+        market_price = float(ticker["last"])
         logger.debug(f"Market price for {symbol}: {market_price}")
 
         # 市場価格ベースでROEのTP/SL計算
@@ -189,8 +189,8 @@ class HyperLiquidExchange(IExchange):
                 "takeProfit": {
                     "type": "market",  # TPもmarketで即座に決済
                     "triggerPrice": tp_trigger,
-                }
-            }
+                },
+            },
         )
 
         logger.info(
@@ -211,7 +211,7 @@ class HyperLiquidExchange(IExchange):
         """
         # 現在の市場価格を取得
         ticker = await self.fetch_price_async(symbol)
-        market_price = float(ticker['last'])
+        market_price = float(ticker["last"])
         logger.debug(f"Market price for {symbol}: {market_price}")
 
         # 市場価格ベースでROEのTP/SL計算
@@ -232,8 +232,8 @@ class HyperLiquidExchange(IExchange):
                 "takeProfit": {
                     "type": "market",  # TPもmarketで即座に決済
                     "triggerPrice": tp_trigger,
-                }
-            }
+                },
+            },
         )
 
         logger.info(
@@ -257,33 +257,32 @@ class HyperLiquidExchange(IExchange):
 
         for position in positions:
             # Skip positions with zero or missing contracts
-            contracts_raw = position.get('contracts')
+            contracts_raw = position.get("contracts")
             if contracts_raw is None:
-                logger.debug(
-                    f"Skipping position with missing contracts: {position}")
+                logger.debug(f"Skipping position with missing contracts: {position}")
                 continue
             contracts = float(contracts_raw)
             if contracts == 0:
                 continue
 
-            position_side = position.get('side')
-            symbol = position.get('symbol')
+            position_side = position.get("side")
+            symbol = position.get("symbol")
 
             # Filter by side if specified
-            if side == PositionSide.LONG and position_side != 'long':
-                logger.debug(
-                    f"Skipping {symbol} (side: {position_side}, filter: long)")
+            if side == PositionSide.LONG and position_side != "long":
+                logger.debug(f"Skipping {symbol} (side: {position_side}, filter: long)")
                 continue
-            if side == PositionSide.SHORT and position_side != 'short':
+            if side == PositionSide.SHORT and position_side != "short":
                 logger.debug(
-                    f"Skipping {symbol} (side: {position_side}, filter: short)")
+                    f"Skipping {symbol} (side: {position_side}, filter: short)"
+                )
                 continue
 
             # Determine the side for closing order (opposite of position side)
-            if position_side == 'long':
-                close_side = 'sell'
-            elif position_side == 'short':
-                close_side = 'buy'
+            if position_side == "long":
+                close_side = "sell"
+            elif position_side == "short":
+                close_side = "buy"
             else:
                 logger.warning(
                     f"Unexpected position side '{position_side}' for {symbol}, skipping"
@@ -299,12 +298,12 @@ class HyperLiquidExchange(IExchange):
                 # Create a market order to close the position
                 result = await self.exchange_private.create_order(
                     symbol=symbol,
-                    type='market',
+                    type="market",
                     side=close_side,
                     amount=contracts,
                     params={
-                        'reduceOnly': True,
-                    }
+                        "reduceOnly": True,
+                    },
                 )
                 results.append(result)
                 logger.info(
@@ -319,54 +318,187 @@ class HyperLiquidExchange(IExchange):
 
     async def fetch_average_buy_price_spot_async(self, symbol: str) -> float:
         logger.warning(
-            "fetch_average_buy_price_spot_async not yet implemented for HyperLiquid")
+            "fetch_average_buy_price_spot_async not yet implemented for HyperLiquid"
+        )
         raise NotImplementedError(
-            "fetch_average_buy_price_spot_async is not yet implemented for HyperLiquid")
+            "fetch_average_buy_price_spot_async is not yet implemented for HyperLiquid"
+        )
 
-    async def fetch_close_orders_all_async(
-        self,
-        symbol: str
-    ) -> list[dict[str, Any]]:
-        logger.warning(
-            "fetch_close_orders_all_async not yet implemented for HyperLiquid")
-        raise NotImplementedError(
-            "fetch_close_orders_all_async is not yet implemented for HyperLiquid")
+    async def fetch_close_orders_all_async(self, symbol: str) -> list[dict[str, Any]]:
+        """Fetch all closed orders for a symbol."""
+        logger.debug(f"Fetching closed orders for {symbol}")
+        orders = await self.exchange_private.fetch_closed_orders(symbol)
+        logger.debug(f"Found {len(orders)} closed orders for {symbol}")
+        return orders
 
-    async def fetch_open_orders_all_async(
-        self,
-        symbol: str
-    ) -> list[dict[str, Any]]:
-        logger.warning(
-            "fetch_open_orders_all_async not yet implemented for HyperLiquid")
-        raise NotImplementedError(
-            "fetch_open_orders_all_async is not yet implemented for HyperLiquid")
+    async def fetch_open_orders_all_async(self, symbol: str) -> list[dict[str, Any]]:
+        """Fetch all open orders for a symbol."""
+        logger.debug(f"Fetching open orders for {symbol}")
+        orders = await self.exchange_private.fetch_open_orders(symbol)
+        logger.debug(f"Found {len(orders)} open orders for {symbol}")
+        return orders
 
     async def fetch_canceled_orders_all_async(
-        self,
-        symbol: str
+        self, symbol: str
     ) -> list[dict[str, Any]]:
-        logger.warning(
-            "fetch_canceled_orders_all_async not yet implemented for HyperLiquid")
-        raise NotImplementedError(
-            "fetch_canceled_orders_all_async is not yet implemented for HyperLiquid")
+        """Fetch all canceled orders for a symbol."""
+        logger.debug(f"Fetching canceled orders for {symbol}")
+        # TODO: Verify if HyperLiquid API supports fetching canceled orders separately
+        # For now, fetch all orders and filter by status
+        orders = await self.exchange_private.fetch_orders(symbol)
+        canceled_orders = [o for o in orders if o.get("status") == "canceled"]
+        logger.debug(f"Found {len(canceled_orders)} canceled orders for {symbol}")
+        return canceled_orders
 
     async def get_current_spot_pnl_async(self, symbol: str) -> float:
-        logger.warning(
-            "get_current_spot_pnl_async not yet implemented for HyperLiquid")
+        logger.warning("get_current_spot_pnl_async not yet implemented for HyperLiquid")
         raise NotImplementedError(
-            "get_current_spot_pnl_async is not yet implemented for HyperLiquid")
+            "get_current_spot_pnl_async is not yet implemented for HyperLiquid"
+        )
 
     async def get_spot_portfolio_async(self) -> list[SpotAsset]:
-        logger.warning(
-            "get_spot_portfolio_async not yet implemented for HyperLiquid")
+        logger.warning("get_spot_portfolio_async not yet implemented for HyperLiquid")
         raise NotImplementedError(
-            "get_spot_portfolio_async is not yet implemented for HyperLiquid")
+            "get_spot_portfolio_async is not yet implemented for HyperLiquid"
+        )
 
-    async def subscribe_ohlcv_ws(
+    # ===== Perpetual Trading Methods for Trailing Stop =====
+
+    async def fetch_positions_async(self) -> list[dict[str, Any]]:
+        """
+        Fetch all open perpetual positions.
+
+        Returns:
+            List of position dictionaries with information about open positions.
+        """
+        logger.debug("Fetching all open positions")
+        positions = await self.exchange_private.fetch_positions()
+        # Filter out positions with zero contracts
+        open_positions = [
+            p
+            for p in positions
+            if p.get("contracts") is not None and float(p.get("contracts", 0)) != 0
+        ]
+        logger.debug(f"Found {len(open_positions)} open positions")
+        return open_positions
+
+    async def modify_stop_loss_order_async(
+        self,
+        order_id: str,
+        symbol: str,
+        new_trigger_price: float,
+    ) -> Any:
+        """
+        Modify an existing stop loss order.
+
+        Args:
+            order_id: The ID of the stop loss order to modify
+            symbol: Trading symbol
+            new_trigger_price: New trigger price for the stop loss
+
+        Returns:
+            Modified order result
+
+        Note:
+            This uses edit_order which may have limitations on HyperLiquid.
+            TODO: Verify if HyperLiquid supports editing trigger orders directly
+        """
+        logger.info(
+            f"Modifying stop loss order {order_id} for {symbol} "
+            f"to trigger at {new_trigger_price:.4f}"
+        )
+
+        try:
+            result = await self.exchange_private.edit_order(
+                id=order_id,
+                symbol=symbol,
+                type="market",
+                side=None,  # Side is not changed
+                amount=None,  # Amount is not changed
+                price=None,
+                params={
+                    "triggerPrice": new_trigger_price,
+                },
+            )
+            logger.info(f"Successfully modified stop loss order {order_id}")
+            return result
+        except Exception as e:
+            logger.error(f"Failed to modify stop loss order {order_id}: {e}")
+            raise
+
+    async def cancel_order_async(
+        self,
+        order_id: str,
+        symbol: str,
+    ) -> Any:
+        """
+        Cancel an existing order.
+
+        Args:
+            order_id: The ID of the order to cancel
+            symbol: Trading symbol
+
+        Returns:
+            Canceled order result
+        """
+        logger.info(f"Canceling order {order_id} for {symbol}")
+        try:
+            result = await self.exchange_private.cancel_order(
+                id=order_id,
+                symbol=symbol,
+            )
+            logger.info(f"Successfully canceled order {order_id}")
+            return result
+        except Exception as e:
+            logger.error(f"Failed to cancel order {order_id}: {e}")
+            raise
+
+    async def create_stop_loss_order_async(
         self,
         symbol: str,
-        interval: str,
-        callback: Callable[[dict[str, Any]], None]
+        side: str,
+        amount: float,
+        trigger_price: float,
+    ) -> Any:
+        """
+        Create a standalone stop loss order.
+
+        Args:
+            symbol: Trading symbol
+            side: Order side ("buy" for closing short, "sell" for closing long)
+            amount: Order amount
+            trigger_price: Price at which the stop loss triggers
+
+        Returns:
+            Created order result
+        """
+        logger.info(
+            f"Creating stop loss order for {symbol}: "
+            f"side={side}, amount={amount}, trigger={trigger_price:.4f}"
+        )
+
+        result = await self.exchange_private.create_order(
+            symbol=symbol,
+            type="market",
+            side=side,
+            amount=amount,
+            price=None,
+            params={
+                "stopLoss": {
+                    "type": "market",
+                    "triggerPrice": trigger_price,
+                },
+                "reduceOnly": True,
+            },
+        )
+
+        logger.info(f"Successfully created stop loss order: {result.get('id', 'N/A')}")
+        return result
+
+    # ===== WebSocket Methods =====
+
+    async def subscribe_ohlcv_ws(
+        self, symbol: str, interval: str, callback: Callable[[dict[str, Any]], None]
     ) -> None:
         """
         Subscribe to OHLCV (candle) updates via WebSocket.
@@ -385,7 +517,7 @@ class HyperLiquidExchange(IExchange):
         """
         # Convert CCXT symbol format to HyperLiquid format
         # XRP/USDC:USDC -> XRP
-        coin = symbol.split('/')[0]
+        coin = symbol.split("/")[0]
 
         # Connect WebSocket if not already connected
         if self.ws_client.ws is None:
@@ -426,7 +558,7 @@ class HyperLiquidExchange(IExchange):
             interval: Candle interval (e.g., "1m", "5m", "1h", "1d")
         """
         # Convert CCXT symbol format to HyperLiquid format
-        coin = symbol.split('/')[0]
+        coin = symbol.split("/")[0]
 
         await self.ws_client.unsubscribe_candle(coin, interval)
         logger.info(

@@ -24,7 +24,15 @@
             "stop_loss_rate": 0.5,
             "amountByUSDC": 50.0,
             "consecutivePositiveCount": 4,
-            "price_change_threshold_percent": 2.0
+            "price_change_threshold_percent": 2.0,
+            "trailing_stop": {
+                "enabled": true,
+                "initial_af": 0.02,
+                "max_af": 0.2,
+                "af_increment": 0.02,
+                "check_interval_seconds": 60,
+                "sl_update_threshold_percent": 0.1
+            }
         },
         "sandbox_mode": true
     }

@@ -1,5 +1,6 @@
+import asyncio
 import sys
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -7,7 +8,6 @@ from loguru import logger
 
 from crypto_spot_collector.apps.import_historical_data import HistoricalDataImporter
 from crypto_spot_collector.exchange.hyperliquid import HyperLiquidExchange
-from crypto_spot_collector.exchange.types import PositionSide
 from crypto_spot_collector.repository.ohlcv_repository import OHLCVRepository
 from crypto_spot_collector.utils.secrets import load_config
 
@@ -17,8 +17,7 @@ LOG_DIR = Path(__file__).parent / "logs"
 LOG_DIR.mkdir(exist_ok=True)
 
 # ログファイル名（日付付き）
-log_file = LOG_DIR / \
-    f"hyperliquid_perp_{datetime.now().strftime('%Y%m%d')}.log"
+log_file = LOG_DIR / f"hyperliquid_perp_{datetime.now().strftime('%Y%m%d')}.log"
 
 # loguruのログ設定
 # デフォルトのハンドラーを削除
@@ -58,7 +57,7 @@ logger.info("Configuration loaded successfully")
 
 async def test_minimal_ws() -> None:
     """最小限のWebSocket購読テスト - candleを購読"""
-    import asyncio
+    import asyncio  # noqa: F401
     import json
     import time
 
@@ -70,11 +69,7 @@ async def test_minimal_ws() -> None:
         # XRPの1分足キャンドルを購読
         subscription = {
             "method": "subscribe",
-            "subscription": {
-                "type": "candle",
-                "coin": "XRP",
-                "interval": "1m"
-            }
+            "subscription": {"type": "candle", "coin": "XRP", "interval": "1m"},
         }
 
         await websocket.send(json.dumps(subscription))
@@ -98,9 +93,12 @@ async def test_minimal_ws() -> None:
             if data.get("channel") == "subscriptionResponse":
                 logger.info(f"Message #{i+1}: Subscription confirmed")
             else:
-                interval_info = f"(+{interval_seconds:.3f}s)" if interval_seconds else ""
+                interval_info = (
+                    f"(+{interval_seconds:.3f}s)" if interval_seconds else ""
+                )
                 logger.info(
-                    f"Message #{i+1} {interval_info} - Channel: {data.get('channel')}")
+                    f"Message #{i+1} {interval_info} - Channel: {data.get('channel')}"
+                )
 
                 # キャンドルデータの場合、詳細を表示
                 if data.get("channel") == "candle":
@@ -122,9 +120,9 @@ def handle_candle(candles: Any) -> None:
     for candle in candles if isinstance(candles, list) else [candles]:
         # candle_count += 1
 
-        logger.info(f"t : {candle.get('t')}"
-                    f"T : {candle.get('T')}"
-                    f"o : {candle.get('o')}")
+        logger.info(
+            f"t : {candle.get('t')}" f"T : {candle.get('T')}" f"o : {candle.get('o')}"
+        )
 
         ohlvc_data = [
             candle.get("t"),  # ミリ秒のまま渡す（register_data内で変換される）
@@ -137,10 +135,7 @@ def handle_candle(candles: Any) -> None:
 
         logger.debug(f"Prepared OHLCV data: {ohlvc_data}")
 
-        result = importer.register_data(
-            symbol="XRP_ws",
-            data=[ohlvc_data]
-        )
+        result = importer.register_data(symbol="XRP_ws", data=[ohlvc_data])
         logger.info(f"register_data returned: {result}")
 
         logger.info(
@@ -168,6 +163,71 @@ def handle_candle(candles: Any) -> None:
 
 
 async def main() -> None:
+    """Main function demonstrating trailing stop with acceleration coefficient."""
+    # Initialize HyperLiquid exchange
+    hyperliquid_exchange = HyperLiquidExchange(
+        mainWalletAddress=secrets["hyperliquid"]["mainWalletAddress"],
+        apiWalletAddress=secrets["hyperliquid"]["apiWalletAddress"],
+        privateKey=secrets["hyperliquid"]["privatekey"],
+        take_profit_rate=secrets["settings"]["perpetual"]["take_profit_rate"],
+        stop_loss_rate=secrets["settings"]["perpetual"]["stop_loss_rate"],
+        leverage=secrets["settings"]["perpetual"]["leverage"],
+        testnet=False,  # Use mainnet
+    )
+
+    # Check if trailing stop is enabled
+    trailing_stop_config = secrets["settings"]["perpetual"].get("trailing_stop", {})
+    trailing_stop_enabled = trailing_stop_config.get("enabled", False)
+
+    if not trailing_stop_enabled:
+        logger.warning("Trailing stop is not enabled in settings")
+        await hyperliquid_exchange.close()
+        return
+
+    # Import trailing stop components
+    from crypto_spot_collector.exchange.trailing_stop_manager import TrailingStopManager
+    from crypto_spot_collector.exchange.trailing_stop_processor import (
+        TrailingStopProcessor,
+    )
+
+    # Initialize trailing stop manager with settings
+    trailing_stop_manager = TrailingStopManager(
+        initial_af=trailing_stop_config.get("initial_af", 0.02),
+        max_af=trailing_stop_config.get("max_af", 0.2),
+        af_increment=trailing_stop_config.get("af_increment", 0.02),
+    )
+
+    # Initialize trailing stop processor
+    trailing_stop_processor = TrailingStopProcessor(
+        exchange=hyperliquid_exchange,
+        trailing_stop_manager=trailing_stop_manager,
+        check_interval_seconds=trailing_stop_config.get("check_interval_seconds", 60),
+        sl_update_threshold_percent=trailing_stop_config.get(
+            "sl_update_threshold_percent", 0.1
+        ),
+    )
+
+    logger.info("Starting trailing stop processor...")
+
+    try:
+        # Start the trailing stop processor in the background
+        processor_task = asyncio.create_task(trailing_stop_processor.start())
+
+        # Wait for the processor to run (or until interrupted)
+        await processor_task
+
+    except KeyboardInterrupt:
+        logger.info("Interrupted by user")
+    finally:
+        # Clean up
+        logger.info("Shutting down trailing stop processor...")
+        await trailing_stop_processor.stop()
+        await hyperliquid_exchange.close()
+        logger.info("Shutdown complete")
+
+
+async def main_original() -> None:
+    """Original main function for testing."""
     # HyperLiquidExchangeのWebSocket機能をテスト
     hyperliquid_exchange = HyperLiquidExchange(
         mainWalletAddress=secrets["hyperliquid"]["mainWalletAddress"],
@@ -180,10 +240,6 @@ async def main() -> None:
     )
 
     symbol = "XRP/USDC:USDC"
-
-    # WebSocket経由でOHLCVデータを購読するテスト
-    candle_count = 0
-    max_candles = 10  # 10本のキャンドルを受信したら終了
 
     logger.info("Starting WebSocket listener task...")
 
@@ -206,9 +262,7 @@ async def main() -> None:
 
         # テスト用のショート
         await hyperliquid_exchange.create_order_perp_short_async(
-            symbol=symbol,
-            amount=10,
-            price=2.196
+            symbol=symbol, amount=10, price=2.196
         )
 
         # logger.info("Subscribing to OHLCV WebSocket...")
@@ -243,13 +297,12 @@ async def main() -> None:
     finally:
         # クリーンアップ
         await hyperliquid_exchange.close()
-        listener_task.cancel()
-        try:
-            await listener_task
-        except asyncio.CancelledError:
-            pass
+        # listener_task.cancel()
+        # try:
+        #     await listener_task
+        # except asyncio.CancelledError:
+        #     pass
+
 
 if __name__ == "__main__":
-    import asyncio
-
     asyncio.run(main())

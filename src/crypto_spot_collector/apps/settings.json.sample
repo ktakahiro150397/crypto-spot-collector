@@ -16,7 +16,15 @@
             "leverage": 20,
             "take_profit_rate": 0.1,
             "stop_loss_rate": 0.1,
-            "amountByUSDC": 10.0
+            "amountByUSDC": 10.0,
+            "trailing_stop": {
+                "enabled": true,
+                "initial_af": 0.02,
+                "max_af": 0.2,
+                "af_increment": 0.02,
+                "check_interval_seconds": 60,
+                "sl_update_threshold_percent": 0.1
+            }
         }
     }
 }
