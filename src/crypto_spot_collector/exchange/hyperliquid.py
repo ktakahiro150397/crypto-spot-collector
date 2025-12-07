@@ -33,6 +33,11 @@ class HyperLiquidExchange(IExchange):
             "privateKey": privateKey,
         })
 
+        if testnet:
+            self.exchange_public.set_sandbox_mode(True)
+            self.exchange_private.set_sandbox_mode(True)
+            logger.info("HyperLiquid exchange set to testnet mode")
+
         self.take_profit_rate = take_profit_rate
         self.stop_loss_rate = stop_loss_rate
         self.leverage = leverage

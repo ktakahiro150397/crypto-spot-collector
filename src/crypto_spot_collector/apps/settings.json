@@ -25,6 +25,7 @@
             "amountByUSDC": 50.0,
             "consecutivePositiveCount": 4,
             "price_change_threshold_percent": 2.0
-        }
+        },
+        "sandbox_mode": true
     }
 }
