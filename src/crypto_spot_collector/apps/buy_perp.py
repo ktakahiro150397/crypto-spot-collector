@@ -14,6 +14,7 @@ from matplotlib import pyplot as plt
 from crypto_spot_collector.apps.import_historical_data import HistoricalDataImporter
 from crypto_spot_collector.checkers.sar_checker import SARChecker
 from crypto_spot_collector.exchange.hyperliquid import HyperLiquidExchange
+from crypto_spot_collector.exchange.trailing_stop_manager import TrailingStopManager
 from crypto_spot_collector.exchange.types import PositionSide
 from crypto_spot_collector.notification.discord import discordNotification
 from crypto_spot_collector.providers.market_data_provider import MarketDataProvider
@@ -124,6 +125,8 @@ logger.info("HyperLiquid exchange client initialized")
 
 sar_checker = SARChecker(
     consecutive_count=secrets["settings"]["perpetual"]["consecutivePositiveCount"])
+
+trailing_stop_manager = TrailingStopManager()
 
 # SAR direction tracking per symbol
 # Key: symbol (e.g., "XRP/USDC:USDC"), Value: SAR direction ("long", "short", or None)
@@ -415,7 +418,8 @@ async def check_signal(
             f"to {current_sar_direction}. Closing all positions."
         )
         closed_positions = await hyperliquid_exchange.close_all_positions_perp_async(
-            side=PositionSide.ALL
+            side=PositionSide.ALL,
+            symbol=symbol,
         )
 
         # Send Discord notification for closed positions
@@ -487,6 +491,36 @@ async def execute_long_order(
         )
         logger.success(f"Successfully created long order for {symbol}")
 
+        # TrailingStopManagerにポジションを追加
+        # TP/SLのID・価格を取得
+        current_orders = await hyperliquid_exchange.fetch_open_orders_all_async(
+            symbol="ETH/USDC:USDC",
+        )
+        stoploss_order_id = ""
+        # stoploss_trigger_price = 0.0
+        takeprofit_order_id = ""
+        # takeprofit_trigger_price = 0.0
+
+        stop_loss_orders = [order for order in current_orders if order.get(
+            "info", {}).get("orderType") == "Stop Market"]
+        if stop_loss_orders:
+            stoploss_order_id = stop_loss_orders[0].get("id", "")
+            # stoploss_trigger_price = stop_loss_orders[0].get("triggerPrice", 0)
+        take_profit_orders = [order for order in current_orders if order.get(
+            "info", {}).get("orderType") == "Take Profit Market"]
+        if take_profit_orders:
+            takeprofit_order_id = take_profit_orders[0].get("id", "")
+            # takeprofit_trigger_price = take_profit_orders[0].get(
+            #     "triggerPrice", 0)
+
+        trailing_stop_manager.add_position(
+            symbol=symbol,
+            side="long",
+            entry_price=current_price,
+            sl_order_id=stoploss_order_id,
+            tp_order_id=takeprofit_order_id,
+        )
+
         # Discord通知
         free_usdc = await hyperliquid_exchange.fetch_free_usdt_async()
 
@@ -553,6 +587,36 @@ async def execute_short_order(
             price=current_price,
         )
         logger.success(f"Successfully created short order for {symbol}")
+
+        # TrailingStopManagerにポジションを追加
+        # TP/SLのID・価格を取得
+        current_orders = await hyperliquid_exchange.fetch_open_orders_all_async(
+            symbol="ETH/USDC:USDC",
+        )
+        stoploss_order_id = ""
+        # stoploss_trigger_price = 0.0
+        takeprofit_order_id = ""
+        # takeprofit_trigger_price = 0.0
+
+        stop_loss_orders = [order for order in current_orders if order.get(
+            "info", {}).get("orderType") == "Stop Market"]
+        if stop_loss_orders:
+            stoploss_order_id = stop_loss_orders[0].get("id", "")
+            # stoploss_trigger_price = stop_loss_orders[0].get("triggerPrice", 0)
+        take_profit_orders = [order for order in current_orders if order.get(
+            "info", {}).get("orderType") == "Take Profit Market"]
+        if take_profit_orders:
+            takeprofit_order_id = take_profit_orders[0].get("id", "")
+            # takeprofit_trigger_price = take_profit_orders[0].get(
+            #     "triggerPrice", 0)
+
+        trailing_stop_manager.add_position(
+            symbol=symbol,
+            side="short",
+            entry_price=current_price,
+            sl_order_id=stoploss_order_id,
+            tp_order_id=takeprofit_order_id,
+        )
 
         # Discord通知
         free_usdc = await hyperliquid_exchange.fetch_free_usdt_async()

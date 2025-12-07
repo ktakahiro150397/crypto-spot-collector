@@ -1,6 +1,14 @@
 # Crypto Spot Collector
 
-A Python application for collecting cryptocurrency spot prices.
+A Python application for collecting cryptocurrency spot prices and managing perpetual positions with advanced trailing stop loss strategies.
+
+## 主な機能
+
+- **暗号通貨価格収集**: OHLCVデータの自動収集とデータベース保存
+- **加速係数付きトレーリングストップ**: Hyperliquid永続ポジション用の動的ストップロス管理
+  - Parabolic SARコンセプトに基づく実装
+  - 利益に応じて自動調整されるストップロス
+  - 詳細は [docs/TRAILING_STOP.md](docs/TRAILING_STOP.md) を参照
 
 ## 開発環境
 
