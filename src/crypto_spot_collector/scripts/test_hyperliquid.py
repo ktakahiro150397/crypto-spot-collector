@@ -1,8 +1,8 @@
 import pandas as pd
 from matplotlib import pyplot as plt
 
-from crypto_spot_collector.apps.hyperliquid import HyperLiquidExchange
 from crypto_spot_collector.exchange.bybit import BybitExchange
+from crypto_spot_collector.exchange.hyperliquid import HyperLiquidExchange
 from crypto_spot_collector.exchange.types import PositionSide
 from crypto_spot_collector.utils.secrets import load_config
 from crypto_spot_collector.utils.trade_data import get_current_pnl_from_db
@@ -51,6 +51,7 @@ async def main() -> None:
     # 持っているポジションを決済
     close_result = await hyperliquid_exchange.close_all_positions_perp_async(
         side=PositionSide.LONG,
+        close_symbol="BTC/USDC:USDC",
     )
     print("Close Position Result:", close_result)
 

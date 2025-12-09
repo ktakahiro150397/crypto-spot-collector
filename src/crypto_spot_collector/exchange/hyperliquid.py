@@ -251,7 +251,7 @@ class HyperLiquidExchange(IExchange):
         logger.info(f"Closing all perpetual positions (side: {side.value})")
 
         # Fetch all positions
-        positions = await self.exchange_private.fetch_positions()
+        positions = await self.exchange_public.fetch_positions()
         logger.debug(f"Fetched {len(positions)} positions")
 
         results: list[Any] = []
