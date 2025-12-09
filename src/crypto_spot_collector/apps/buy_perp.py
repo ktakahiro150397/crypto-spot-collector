@@ -276,9 +276,51 @@ def should_short(df: pd.DataFrame, threshold_percent: float) -> tuple[bool, str]
     return is_short, reason
 
 
-async def main() -> None:
-    """メインループ: 毎分0秒に実行"""
-    logger.info("Starting buy perp script")
+async def trailing_stop_loop() -> None:
+    """トレーリングストップ管理ループ: 15分ごとに実行"""
+    trailing_stop_interval = 5  # 分
+    logger.info(
+        f"Starting trailing stop loop (interval: {trailing_stop_interval} minutes)")
+
+    while True:
+        # 次の実行時刻を計算（5分の倍数の分に実行）
+        now = datetime.now(timezone.utc)
+        current_minute = now.minute
+
+        # 次の実行分を計算（15分の倍数: 0, 15, 30, 45）
+        next_minute = ((current_minute // trailing_stop_interval) +
+                       1) * trailing_stop_interval
+
+        if next_minute >= 60:
+            # 次の時間に繰り越し
+            next_run = (now + timedelta(hours=1)).replace(minute=0,
+                                                          second=0, microsecond=0)
+        else:
+            # 同じ時間内
+            next_run = now.replace(minute=next_minute, second=0, microsecond=0)
+
+        wait_seconds = (next_run - now).total_seconds()
+        logger.info(
+            f"[Trailing Stop] Waiting for {wait_seconds:.1f} seconds until next run at {next_run} UTC "
+            f"(run every {trailing_stop_interval} minutes)"
+        )
+        await asyncio.sleep(wait_seconds)
+
+        logger.info(
+            "[Trailing Stop] Running trailing stop check for all symbols")
+
+        # 各シンボルについてトレーリングストップをチェック
+        for symbol in perp_symbols:
+            try:
+                await check_trailing_stop(symbol=f"{symbol}")
+            except Exception as e:
+                logger.error(f"[Trailing Stop] Error checking {symbol}: {e}")
+                continue
+
+
+async def signal_check_loop() -> None:
+    """シグナルチェックループ: timeframeごとに実行"""
+    logger.info("Starting signal check loop")
 
     timeframe_perp = secrets["settings"]["perpetual"].get("timeframe", "5m")
 
@@ -331,7 +373,8 @@ async def main() -> None:
         toDateUtc = datetime.now(timezone.utc).replace(second=0, microsecond=0)
         fromDateUtc = toDateUtc - timedelta(days=1)  # 過去2分のデータを取得
 
-        logger.info(f"Fetching OHLCV data from {fromDateUtc} to {toDateUtc}")
+        logger.info(
+            f"[Signal Check] Fetching OHLCV data from {fromDateUtc} to {toDateUtc}")
 
         # 各シンボルについて処理
         for symbol in perp_symbols:
@@ -357,9 +400,6 @@ async def main() -> None:
                 # OHLCVデータの登録
                 importer.register_data(f"{symbol}", ohlcv)
                 logger.debug(f"Registered OHLCV data for {symbol.upper()}")
-
-                # トレーリングストップ管理
-                await check_trailing_stop(symbol=f"{symbol}")
 
                 # シグナルチェック
                 await check_signal(
@@ -930,8 +970,18 @@ def notification_plot_buff(
     return img_buffer
 
 
-if __name__ == "__main__":
+async def main() -> None:
+    """メインエントリーポイント: 複数の非同期タスクを並行実行"""
     logger.info("Starting crypto perp collector application")
+
+    # シグナルチェックループとトレーリングストップループを並行実行
+    await asyncio.gather(
+        signal_check_loop(),
+        trailing_stop_loop(),
+    )
+
+
+if __name__ == "__main__":
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
