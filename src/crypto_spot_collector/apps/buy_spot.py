@@ -129,7 +129,8 @@ async def main() -> None:
     logger.info("Starting buy spot script")
 
     logger.info("---- Settings ----")
-    logger.info(f"Discord Webhook URL: {secrets['discord']['discordWebhookUrl']}")
+    logger.info(
+        f"Discord Webhook URL: {secrets['discord']['discordWebhookUrl']}")
     logger.info(f"Spot Symbols: {spot_symbol}")
     for setting in secrets["settings"]["timeframes"]:
         logger.info("------------------")
@@ -146,7 +147,8 @@ async def main() -> None:
         # 次の1時間まで待機処理
         now = datetime.now(timezone.utc)
         logger.info(f"Current time: {now}")
-        next_run = (now + timedelta(hours=1)).replace(minute=0, second=0, microsecond=0)
+        next_run = (now + timedelta(hours=1)).replace(minute=0,
+                                                      second=0, microsecond=0)
         wait_seconds = (next_run - now).total_seconds()
         logger.info(
             f"Waiting for {wait_seconds} seconds until next run at {next_run} UTC"
@@ -262,7 +264,7 @@ async def check_signal(
         return
 
     # Use SARChecker to check for buy signal
-    sar_checker = SARChecker(consecutive_positive_count=consecutivePositiveCount)
+    sar_checker = SARChecker(consecutive_count=consecutivePositiveCount)
     sar_up_signal = sar_checker.check(df)
     logger.info(f"{symbol}: SAR Up Signal: {sar_up_signal}")
 
@@ -287,7 +289,8 @@ async def check_signal(
         free_usdt = await bybit_exchange.fetch_free_usdt_async()
         # average_price = bybit_exchange.fetch_average_buy_price_spot(symbol)
         with TradeDataRepository() as repo:
-            _, average_price = repo.get_current_position_and_avg_price(symbol=symbol)
+            _, average_price = repo.get_current_position_and_avg_price(
+                symbol=symbol)
 
         embed = discordNotification.embed_object_create_helper(
             symbol=symbol,
