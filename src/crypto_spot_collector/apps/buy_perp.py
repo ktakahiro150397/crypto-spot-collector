@@ -529,7 +529,7 @@ async def check_trailing_stop(symbol: str) -> None:
 
         await hyperliquid_exchange.create_or_update_tp_sl_async(
             symbol=symbol,
-            position_side=position.side,
+            side=position.side,
             takeprofit_order_id=current_tp_sl_info.take_profit_order_id,
             stoploss_order_id=current_tp_sl_info.stop_loss_order_id,
             take_profit_trigger_price=current_tp_sl_info.take_profit_trigger_price,
