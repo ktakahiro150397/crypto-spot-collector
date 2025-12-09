@@ -30,32 +30,38 @@ async def main() -> None:
 
     # print("Balance:", balance)
 
-    result = await hyperliquid_exchange.create_order_perp_short_async(
-        symbol="ETH/USDC:USDC",
-        amount=0.01,
-        price=3000,
-    )
-    print("Order Result:", result)
+    # result = await hyperliquid_exchange.create_order_perp_short_async(
+    #     symbol="ETH/USDC:USDC",
+    #     amount=0.01,
+    #     price=3000,
+    # )
+    # print("Order Result:", result)
 
-    tpsl_order = await hyperliquid_exchange.fetch_tp_sl_info(
-        symbol="ETH/USDC:USDC",
-    )
-    print("TP/SL Order Info:", tpsl_order)
+    # tpsl_order = await hyperliquid_exchange.fetch_tp_sl_info(
+    #     symbol="ETH/USDC:USDC",
+    # )
+    # print("TP/SL Order Info:", tpsl_order)
 
-    if tpsl_order is not None:
-        take_profit_order_id = tpsl_order.take_profit_order_id
-        stop_loss_order_id = tpsl_order.stop_loss_order_id
+    # if tpsl_order is not None:
+    #     take_profit_order_id = tpsl_order.take_profit_order_id
+    #     stop_loss_order_id = tpsl_order.stop_loss_order_id
 
-        # 更新
-        new_tpsl_order = await hyperliquid_exchange.create_or_update_tp_sl_async(
-            symbol="ETH/USDC:USDC",
-            side=PositionSide.SHORT,
-            takeprofit_order_id=take_profit_order_id,
-            stoploss_order_id=stop_loss_order_id,
-            take_profit_trigger_price=3100,
-            stop_loss_trigger_price=3400,
-        )
-        print("Updated TP/SL Order Info:", new_tpsl_order)
+    #     # 更新
+    #     new_tpsl_order = await hyperliquid_exchange.create_or_update_tp_sl_async(
+    #         symbol="ETH/USDC:USDC",
+    #         side=PositionSide.SHORT,
+    #         takeprofit_order_id=take_profit_order_id,
+    #         stoploss_order_id=stop_loss_order_id,
+    #         take_profit_trigger_price=3100,
+    #         stop_loss_trigger_price=3400,
+    #     )
+    #     print("Updated TP/SL Order Info:", new_tpsl_order)
+
+    positions = await hyperliquid_exchange.exchange_public.fetch_positions(["ETH/USDC:USDC"])
+    print("Positions:", positions)
+
+    from crypto_spot_collector.apps.buy_perp import initialize_trailing_manager
+    await initialize_trailing_manager()
 
     # result = await hyperliquid_exchange.create_order_perp_long_async(
     #     symbol="SOL/USDC:USDC",

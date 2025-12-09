@@ -135,6 +135,79 @@ sar_direction_tracker: dict[str, str | None] = {}
 trailing_manager = TrailingStopManagerHyperLiquid()
 
 
+async def initialize_trailing_manager() -> None:
+    """スクリプト起動時に既存のポジションとTP/SL注文を取得してTrailingManagerを初期化する"""
+    logger.info("Initializing TrailingManager with existing positions...")
+
+    try:
+        # 全シンボルの既存ポジションを取得
+        all_positions = await hyperliquid_exchange.exchange_public.fetch_positions()
+
+        initialized_count = 0
+        for pos in all_positions:
+            contracts = pos.get('contracts', 0)
+            if not contracts or float(contracts) == 0:
+                continue
+
+            symbol = pos.get('symbol')
+            if symbol not in perp_symbols:
+                logger.debug(f"Skipping {symbol} (not in monitoring list)")
+                continue
+
+            position_side_str = pos.get('side')  # 'long' or 'short'
+            entry_price = float(pos.get('entryPrice', 0))
+
+            if position_side_str == 'long':
+                position_side = PositionSide.LONG
+            elif position_side_str == 'short':
+                position_side = PositionSide.SHORT
+            else:
+                logger.warning(
+                    f"Unknown position side '{position_side_str}' for {symbol}")
+                continue
+
+            # TP/SL注文情報を取得
+            try:
+                tp_sl_info = await hyperliquid_exchange.fetch_tp_sl_info(symbol=symbol)
+
+                if tp_sl_info is None:
+                    logger.warning(
+                        f"No TP/SL orders found for {symbol}. "
+                        "Position will not be managed by TrailingManager."
+                    )
+                    continue
+
+                # TrailingManagerにポジションを登録
+                trailing_manager.add_or_update_position(
+                    symbol=symbol,
+                    side=position_side,
+                    entry_price=entry_price,
+                    stoploss_order_id=tp_sl_info.stop_loss_order_id,
+                    initial_stoploss_price=tp_sl_info.stop_loss_trigger_price,
+                )
+
+                initialized_count += 1
+                logger.info(
+                    f"Initialized TrailingManager for {symbol}: "
+                    f"side={position_side.value}, entry={entry_price:.4f}, "
+                    f"initial_sl={tp_sl_info.stop_loss_trigger_price:.4f}"
+                )
+
+            except Exception as e:
+                logger.error(
+                    f"Failed to initialize TrailingManager for {symbol}: {e}")
+                continue
+
+        logger.info(
+            f"TrailingManager initialization complete. "
+            f"Initialized {initialized_count} position(s)."
+        )
+
+    except Exception as e:
+        logger.error(f"Error during TrailingManager initialization: {e}")
+        # 初期化に失敗しても続行（新規ポジションから管理開始）
+
+
 def check_price_change_signal(
     df: pd.DataFrame, threshold_percent: float
 ) -> tuple[bool, bool, float, str]:
@@ -415,12 +488,29 @@ async def signal_check_loop() -> None:
 
 
 async def check_trailing_stop(symbol: str) -> None:
-    logger.info("Checking trailing stop updates for all positions")
-
     position = trailing_manager.get_position(symbol=symbol)
 
     if position is None:
         logger.info(f"No trailing stop position found for {symbol}")
+        return
+
+    # 実際のポジションを確認（損切り/利確で決済されている可能性がある）
+    actual_positions = await hyperliquid_exchange.exchange_public.fetch_positions([symbol])
+    has_active_position = False
+
+    for pos in actual_positions:
+        contracts = pos.get('contracts', 0)
+        if contracts and float(contracts) != 0:
+            has_active_position = True
+            break
+
+    # ポジションが存在しない場合、TrailingManagerから削除
+    if not has_active_position:
+        logger.info(
+            f"Position for {symbol} has been closed (likely by TP/SL). "
+            "Removing from TrailingManager."
+        )
+        trailing_manager.remove_position(symbol=symbol)
         return
 
     # 現在価格を取得
@@ -973,6 +1063,9 @@ def notification_plot_buff(
 async def main() -> None:
     """メインエントリーポイント: 複数の非同期タスクを並行実行"""
     logger.info("Starting crypto perp collector application")
+
+    # 起動時にTrailingManagerを初期化（既存ポジションを取得）
+    await initialize_trailing_manager()
 
     # シグナルチェックループとトレーリングストップループを並行実行
     await asyncio.gather(
