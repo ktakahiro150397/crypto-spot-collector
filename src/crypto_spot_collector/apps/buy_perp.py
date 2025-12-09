@@ -14,6 +14,9 @@ from matplotlib import pyplot as plt
 from crypto_spot_collector.apps.import_historical_data import HistoricalDataImporter
 from crypto_spot_collector.checkers.sar_checker import SARChecker
 from crypto_spot_collector.exchange.hyperliquid import HyperLiquidExchange
+from crypto_spot_collector.exchange.trailingstop.trailingstop_manager import (
+    TrailingStopManagerHyperLiquid,
+)
 from crypto_spot_collector.exchange.types import PositionSide
 from crypto_spot_collector.notification.discord import discordNotification
 from crypto_spot_collector.providers.market_data_provider import MarketDataProvider
@@ -94,11 +97,11 @@ plt.rcParams["ytick.color"] = "#2C3E50"
 
 # HyperLiquidで取引する永続シンボル
 perp_symbols = [
-    "BTC",
-    "ETH",
-    "XRP",
-    "SOL",
-    "HYPE",
+    "BTC/USDC:USDC",
+    "ETH/USDC:USDC",
+    "XRP/USDC:USDC",
+    "SOL/USDC:USDC",
+    "HYPE/USDC:USDC",
 ]
 
 logger.info("Initializing crypto perp collector script")
@@ -128,6 +131,8 @@ sar_checker = SARChecker(
 # SAR direction tracking per symbol
 # Key: symbol (e.g., "XRP/USDC:USDC"), Value: SAR direction ("long", "short", or None)
 sar_direction_tracker: dict[str, str | None] = {}
+
+trailing_manager = TrailingStopManagerHyperLiquid()
 
 
 def check_price_change_signal(
@@ -331,11 +336,11 @@ async def main() -> None:
         # 各シンボルについて処理
         for symbol in perp_symbols:
             try:
-                logger.debug(f"Processing {symbol}/USDC:USDC")
+                logger.debug(f"Processing {symbol}")
 
                 # 過去1時間のOHLCVデータを取得
                 ohlcv = await hyperliquid_exchange.fetch_ohlcv_async(
-                    symbol=f"{symbol}/USDC:USDC",
+                    symbol=f"{symbol}",
                     timeframe=timeframe_perp,
                     fromDate=fromDateUtc,
                     toDate=toDateUtc,
@@ -350,20 +355,58 @@ async def main() -> None:
                         f"Last OHLCV record timestamp: {ohlcv[-1][0]} ({datetime.fromtimestamp(ohlcv[-1][0]/1000, tz=timezone.utc)})")
 
                 # OHLCVデータの登録
-                importer.register_data(f"{symbol}/USDC:USDC", ohlcv)
+                importer.register_data(f"{symbol}", ohlcv)
                 logger.debug(f"Registered OHLCV data for {symbol.upper()}")
+
+                # トレーリングストップ管理
+                await check_trailing_stop(symbol=f"{symbol}")
 
                 # シグナルチェック
                 await check_signal(
                     startDate=fromDateUtc,
                     endDate=toDateUtc,
-                    symbol=f"{symbol}/USDC:USDC",
+                    symbol=f"{symbol}",
                     timeframe=timeframe_perp,
                     amountByUSDC=amount_by_usdc,
                 )
             except Exception as e:
                 logger.error(f"Error processing {symbol}: {e}")
                 continue
+
+
+async def check_trailing_stop(symbol: str) -> None:
+    logger.info("Checking trailing stop updates for all positions")
+
+    position = trailing_manager.get_position(symbol=symbol)
+
+    if position is None:
+        logger.info(f"No trailing stop position found for {symbol}")
+        return
+
+    # 現在価格を取得
+    ticker = await hyperliquid_exchange.fetch_price_async(f"{symbol}")
+    current_price = ticker["last"]
+
+    updated = trailing_manager.update_stoploss_price(
+        symbol=symbol,
+        current_price=current_price,
+    )
+
+    if updated:
+        current_tp_sl_info = await hyperliquid_exchange.fetch_tp_sl_info(
+            symbol=symbol,
+        )
+
+        await hyperliquid_exchange.create_or_update_tp_sl_async(
+            symbol=symbol,
+            position_side=position.side,
+            takeprofit_order_id=current_tp_sl_info.take_profit_order_id,
+            stoploss_order_id=current_tp_sl_info.stop_loss_order_id,
+            take_profit_trigger_price=current_tp_sl_info.take_profit_trigger_price,
+            stop_loss_trigger_price=position.current_stoploss_price,
+        )
+        logger.info(
+            f"Updated trailing stoploss for {symbol} to {position.current_stoploss_price}")
 
 
 async def check_signal(
@@ -421,6 +464,7 @@ async def check_signal(
 
         # Send Discord notification for closed positions
         if closed_positions:
+            trailing_manager.remove_position(symbol=symbol)
             await send_close_position_notification(
                 symbol=symbol,
                 closed_positions=closed_positions,
@@ -488,6 +532,19 @@ async def execute_long_order(
         )
         logger.success(f"Successfully created long order for {symbol}")
 
+        # トレーリングストップ管理の更新
+        # 新規ポジション登録
+        current_tp_sl_info = await hyperliquid_exchange.fetch_tp_sl_info(
+            symbol=symbol,
+        )
+        trailing_manager.add_or_update_position(
+            symbol=symbol,
+            side=PositionSide.LONG,
+            entry_price=current_price,
+            stoploss_order_id=current_tp_sl_info.stop_loss_order_id,
+            initial_stoploss_price=current_tp_sl_info.stop_loss_trigger_price,
+        )
+
         # Discord通知
         free_usdc = await hyperliquid_exchange.fetch_free_usdt_async()
 
@@ -554,6 +611,20 @@ async def execute_short_order(
             price=current_price,
         )
         logger.success(f"Successfully created short order for {symbol}")
+
+        # トレーリングストップ管理の更新
+        # 新規ポジション登録
+        current_tp_sl_info = await hyperliquid_exchange.fetch_tp_sl_info(
+            symbol=symbol,
+        )
+
+        trailing_manager.add_or_update_position(
+            symbol=symbol,
+            side=PositionSide.SHORT,
+            entry_price=current_price,
+            stoploss_order_id=current_tp_sl_info.stop_loss_order_id,
+            initial_stoploss_price=current_tp_sl_info.stop_loss_trigger_price,
+        )
 
         # Discord通知
         free_usdc = await hyperliquid_exchange.fetch_free_usdt_async()

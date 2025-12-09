@@ -40,23 +40,24 @@ class TrailingStopManagerHyperLiquid():
         initial_stoploss_price: float = kwargs.get(
             "initial_stoploss_price", 0.0)
 
-        position = TrailingStopPositionHyperLiquid(
-            symbol=symbol,
-            side=side,
-            entry_price=entry_price,
-            stoploss_order_id=stoploss_order_id,
-            highest_price=entry_price,
-            lowest_price=entry_price,
-            current_stoploss_price=initial_stoploss_price,
-            current_af_factor=self.initial_af_factor,
-        )
-
         if symbol in self.positions:
             logger.info(f"Overwriting Trailing Stop Position for {symbol}")
+            position = self.positions[symbol]
+            position.stoploss_order_id = stoploss_order_id
         else:
             logger.info(f"Adding Trailing Stop Position for {symbol}")
+            position = TrailingStopPositionHyperLiquid(
+                symbol=symbol,
+                side=side,
+                entry_price=entry_price,
+                stoploss_order_id=stoploss_order_id,
+                highest_price=entry_price,
+                lowest_price=entry_price,
+                current_stoploss_price=initial_stoploss_price,
+                current_af_factor=self.initial_af_factor,
+            )
 
-        self.positions[symbol] = position
+            self.positions[symbol] = position
 
     def get_position(self, symbol: str) -> TrailingStopPositionHyperLiquid | None:
         return self.positions.get(symbol, None)
