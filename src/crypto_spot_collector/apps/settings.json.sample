@@ -11,6 +11,12 @@
                 "amountBuyUSDT": 20.0,
                 "consecutivePositiveCount": 3
             }
-        ]
+        ],
+        "perpetual": {
+            "leverage": 20,
+            "take_profit_rate": 0.1,
+            "stop_loss_rate": 0.1,
+            "amountByUSDC": 10.0
+        }
     }
 }

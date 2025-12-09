@@ -5,7 +5,11 @@ from datetime import datetime
 from types import TracebackType
 from typing import Any, Optional
 
-from crypto_spot_collector.exchange.types import SpotAsset, SpotOrderResult
+from crypto_spot_collector.exchange.types import (
+    PositionSide,
+    SpotAsset,
+    SpotOrderResult,
+)
 
 
 class IExchange(ABC):
@@ -74,6 +78,42 @@ class IExchange(ABC):
         symbol: str
     ) -> tuple[Any, SpotOrderResult]:
         """Create a spot order asynchronously."""
+        pass
+
+    @abstractmethod
+    async def create_order_perp_long_async(
+        self,
+        symbol: str,
+        amount: float,
+        price: float,
+    ) -> Any:
+        """Create a perpetual long order asynchronously."""
+        pass
+
+    @abstractmethod
+    async def create_order_perp_short_async(
+        self,
+        symbol: str,
+        amount: float,
+        price: float,
+    ) -> Any:
+        """Create a perpetual short order asynchronously."""
+        pass
+
+    @abstractmethod
+    async def close_all_positions_perp_async(
+        self,
+        side: PositionSide = PositionSide.ALL,
+    ) -> list[Any]:
+        """Close all perpetual positions with market orders.
+        Args:
+            side: The position side to close.
+                - PositionSide.LONG: Close only long positions
+                - PositionSide.SHORT: Close only short positions
+                - PositionSide.ALL: Close all positions (default)
+        Returns:
+            List of order results for each closed position.
+        """
         pass
 
     @abstractmethod

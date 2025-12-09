@@ -15,6 +15,22 @@ services:
     environment:
       - DATABASE_URL=mysql://crypto_user:crypto_pass@mysql:3306/crypto_pachinko
 
+  app_perp:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    volumes:
+      - ./src/crypto_spot_collector/apps/secrets.json:/app/crypto_spot_collector/apps/secrets.json:ro
+      - ./logs:/app/crypto_spot_collector/apps/logs
+    # command: sleep infinity
+    command: uv run crypto_spot_collector/apps/buy_perp.py
+    depends_on:
+      - mysql
+    networks:
+      - crypto-network
+    environment:
+      - DATABASE_URL=mysql://crypto_user:crypto_pass@mysql:3306/crypto_pachinko
+
   bot:
     build:
       context: .
@@ -47,8 +63,19 @@ services:
     ports:
       - "3306:3306"
 
+  portainer:
+    image: portainer/portainer-ce:latest
+    container_name: portainer
+    restart: always
+    ports:
+      - "9000:9000"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - portainer_data:/data
+
 volumes:
   mysql-data:
+  portainer_data:
 
 
 networks:

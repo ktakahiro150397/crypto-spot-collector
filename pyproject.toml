@@ -21,6 +21,7 @@ dependencies = [
     "seaborn>=0.13.2",
     "discord-py>=2.6.4",
     "gitpython>=3.1.0",
+    "websockets>=12.0",
 ]
 
 [project.scripts]

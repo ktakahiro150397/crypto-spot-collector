@@ -1,7 +1,7 @@
 """Market data provider with technical indicators."""
 
 from datetime import datetime
-from typing import Any, Dict, List, Literal, Optional
+from typing import Dict, List, Literal, Optional
 
 import pandas as pd
 from ta.trend import PSARIndicator
@@ -19,7 +19,7 @@ class MarketDataProvider:
     def get_dataframe_with_indicators(
         self,
         symbol: str,
-        interval: Literal["1m", "5m", "10m", "1h", "2h", "4h", "6h"],
+        interval: Literal["1m", "5m", "10m", "30m", "1h", "2h", "4h", "6h"],
         from_datetime: datetime,
         to_datetime: datetime,
         sma_windows: Optional[List[int]] = None,
@@ -46,6 +46,13 @@ class MarketDataProvider:
             sar_config = {"step": 0.02, "max_step": 0.2}
 
         # Fetch data from repository
+        from loguru import logger
+
+        logger.debug(
+            f"Fetching OHLCV data: symbol={symbol}, interval={interval}, "
+            f"from={from_datetime}, to={to_datetime}"
+        )
+
         with OHLCVRepository() as repo:
             data = repo.get_ohlcv_data(
                 symbol=symbol,
@@ -53,6 +60,13 @@ class MarketDataProvider:
                 from_datetime=from_datetime,
                 to_datetime=to_datetime,
             )
+
+            logger.debug(f"Retrieved {len(data)} records from database")
+            if data:
+                logger.debug(
+                    f"First record timestamp: {data[0].timestamp_utc}")
+                logger.debug(
+                    f"Last record timestamp: {data[-1].timestamp_utc}")
 
             # Convert to DataFrame
             df = pd.DataFrame(

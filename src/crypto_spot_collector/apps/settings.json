@@ -16,6 +16,16 @@
                 "amountBuyUSDT": 1,
                 "consecutivePositiveCount": 6
             }
-        ]
+        ],
+        "perpetual": {
+            "timeframe": "30m",
+            "leverage": 20,
+            "take_profit_rate": 1.5,
+            "stop_loss_rate": 0.5,
+            "amountByUSDC": 50.0,
+            "consecutivePositiveCount": 4,
+            "price_change_threshold_percent": 2.0
+        },
+        "sandbox_mode": true
     }
 }
