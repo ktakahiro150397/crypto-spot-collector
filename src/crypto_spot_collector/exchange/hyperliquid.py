@@ -1,3 +1,4 @@
+from dataclasses import dataclass
 from datetime import datetime
 from types import TracebackType
 from typing import Any, Callable, Optional
@@ -7,11 +8,23 @@ from loguru import logger
 
 from crypto_spot_collector.exchange.hyperliquid_ws import HyperLiquidWebSocket
 from crypto_spot_collector.exchange.interface import IExchange
+from crypto_spot_collector.exchange.trailingstop.trailingstop_position import (
+    TrailingStopPositionHyperLiquid,
+)
 from crypto_spot_collector.exchange.types import (
     PositionSide,
     SpotAsset,
     SpotOrderResult,
 )
+
+
+@dataclass
+class HyperliquidTakeProfitStopLossPositionInfo:
+    symbol: str
+    take_profit_order_id: str
+    stop_loss_order_id: str
+    take_profit_trigger_price: float
+    stop_loss_trigger_price: float
 
 
 class HyperLiquidExchange(IExchange):
@@ -347,10 +360,11 @@ class HyperLiquidExchange(IExchange):
         self,
         symbol: str
     ) -> list[dict[str, Any]]:
-        logger.warning(
-            "fetch_open_orders_all_async not yet implemented for HyperLiquid")
-        raise NotImplementedError(
-            "fetch_open_orders_all_async is not yet implemented for HyperLiquid")
+        """Fetch all open orders for a symbol."""
+        logger.debug(f"Fetching open orders for {symbol}")
+        orders = await self.exchange_public.fetch_open_orders(symbol)
+        logger.debug(f"Found {len(orders)} open orders for {symbol}")
+        return orders
 
     async def fetch_canceled_orders_all_async(
         self,
@@ -360,6 +374,117 @@ class HyperLiquidExchange(IExchange):
             "fetch_canceled_orders_all_async not yet implemented for HyperLiquid")
         raise NotImplementedError(
             "fetch_canceled_orders_all_async is not yet implemented for HyperLiquid")
+
+    async def fetch_tp_sl_info(
+        self,
+        symbol: str
+    ) -> HyperliquidTakeProfitStopLossPositionInfo | None:
+        current_orders = await self.fetch_open_orders_all_async(symbol=symbol)
+
+        stop_loss_orders = [
+            order for order in current_orders if order.get("info", {}).get("orderType") == "Stop Market"
+        ]
+        print("Current Stop Loss Orders:", stop_loss_orders)
+        take_profit_orders = [
+            order for order in current_orders if order.get("info", {}).get("orderType") == "Take Profit Market"
+        ]
+        print("Current Take Profit Orders:", take_profit_orders)
+
+        if not stop_loss_orders or not take_profit_orders:
+            logger.info(f"No TP/SL orders found for symbol {symbol}")
+            return None
+
+        stoploss_order_id = stop_loss_orders[0].get("id", "")
+        stoploss_trigger_price = stop_loss_orders[0].get("triggerPrice", 0)
+        takeprofit_order_id = take_profit_orders[0].get("id", "")
+        takeprofit_trigger_price = take_profit_orders[0].get("triggerPrice", 0)
+
+        return HyperliquidTakeProfitStopLossPositionInfo(
+            symbol=symbol,
+            take_profit_order_id=takeprofit_order_id,
+            stop_loss_order_id=stoploss_order_id,
+            take_profit_trigger_price=takeprofit_trigger_price,
+            stop_loss_trigger_price=stoploss_trigger_price,
+        )
+
+    async def create_or_update_tp_sl_async(
+        self,
+        symbol: str,
+        side: PositionSide,
+        takeprofit_order_id: str,
+        stoploss_order_id: str,
+        take_profit_trigger_price: float,
+        stop_loss_trigger_price: float,
+    ) -> HyperliquidTakeProfitStopLossPositionInfo | None:
+        # 現在のTP/SL注文をキャンセル
+        await self.cancel_orders_async(
+            order_ids=[takeprofit_order_id, stoploss_order_id],
+            symbol=symbol,
+        )
+
+        side = "sell" if side == PositionSide.LONG else "buy"
+
+        # 新しいTP/SL注文を作成
+        await self.exchange_private.create_orders(
+            [
+                {
+                    "symbol": symbol,
+                    "type": "market",
+                    "side": side,
+                    "amount": 0,
+                    "price": stop_loss_trigger_price,
+                    "params": {
+                        "stopLossPrice": stop_loss_trigger_price,
+                        "reduceOnly": True,
+                    }
+                },
+                {
+                    "symbol": symbol,
+                    "type": "market",
+                    "side": side,
+                    "amount": 0,
+                    "price": take_profit_trigger_price,
+                    "params": {
+                        "takeProfitPrice": take_profit_trigger_price,
+                        "reduceOnly": True,
+                    }
+                },
+            ]
+        )
+
+        logger.info(
+            "Successfully created stop loss order")
+
+        # 更新後のTP/SL注文情報を返す
+        tp_sl_info = await self.fetch_tp_sl_info(
+            symbol=symbol,
+        )
+        return tp_sl_info
+
+    async def cancel_orders_async(
+        self,
+        order_ids: list[str],
+        symbol: str,
+    ) -> Any:
+        """
+        Cancel an existing order.
+        Args:
+            order_id: The ID of the order to cancel
+            symbol: Trading symbol
+        Returns:
+            Canceled order result
+        """
+        logger.info(f"Canceling order {order_ids} for {symbol}")
+        try:
+            result = await self.exchange_private.cancel_orders(
+                ids=order_ids,
+                symbol=symbol,
+            )
+            logger.info(f"Successfully canceled order {order_ids}")
+            return result
+        except Exception as e:
+            logger.error(f"Failed to cancel order {order_ids}: {e}")
+            raise
 
     async def get_current_spot_pnl_async(self, symbol: str) -> float:
         logger.warning(

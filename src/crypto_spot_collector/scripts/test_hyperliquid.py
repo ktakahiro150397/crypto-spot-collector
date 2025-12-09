@@ -30,11 +30,33 @@ async def main() -> None:
 
     # print("Balance:", balance)
 
-    # result = await hyperliquid_exchange.create_order_perp_long_async(
-    #     symbol="ETH/USDC:USDC",
-    #     amount=0.01,
-    #     price=3000,
-    # )
+    result = await hyperliquid_exchange.create_order_perp_short_async(
+        symbol="ETH/USDC:USDC",
+        amount=0.01,
+        price=3000,
+    )
+    print("Order Result:", result)
+
+    tpsl_order = await hyperliquid_exchange.fetch_tp_sl_info(
+        symbol="ETH/USDC:USDC",
+    )
+    print("TP/SL Order Info:", tpsl_order)
+
+    if tpsl_order is not None:
+        take_profit_order_id = tpsl_order.take_profit_order_id
+        stop_loss_order_id = tpsl_order.stop_loss_order_id
+
+        # 更新
+        new_tpsl_order = await hyperliquid_exchange.create_or_update_tp_sl_async(
+            symbol="ETH/USDC:USDC",
+            side=PositionSide.SHORT,
+            takeprofit_order_id=take_profit_order_id,
+            stoploss_order_id=stop_loss_order_id,
+            take_profit_trigger_price=3100,
+            stop_loss_trigger_price=3400,
+        )
+        print("Updated TP/SL Order Info:", new_tpsl_order)
+
     # result = await hyperliquid_exchange.create_order_perp_long_async(
     #     symbol="SOL/USDC:USDC",
     #     amount=5,
@@ -49,11 +71,11 @@ async def main() -> None:
     # print("Order Result:", result)
 
     # 持っているポジションを決済
-    close_result = await hyperliquid_exchange.close_all_positions_perp_async(
-        side=PositionSide.LONG,
-        close_symbol="BTC/USDC:USDC",
-    )
-    print("Close Position Result:", close_result)
+    # close_result = await hyperliquid_exchange.close_all_positions_perp_async(
+    #     side=PositionSide.LONG,
+    #     close_symbol="BTC/USDC:USDC",
+    # )
+    # print("Close Position Result:", close_result)
 
 if __name__ == "__main__":
     import asyncio
