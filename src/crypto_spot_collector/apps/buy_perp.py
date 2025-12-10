@@ -3,6 +3,7 @@ import sys
 from datetime import datetime, timedelta, timezone
 from io import BytesIO
 from pathlib import Path
+from typing import Any
 
 import matplotlib.dates as mdates
 import pandas as pd
@@ -137,6 +138,9 @@ sar_direction_tracker: dict[str, str | None] = {}
 
 trailing_manager = TrailingStopManagerHyperLiquid()
 background_tasks: set[asyncio.Task] = set()
+
+script_launch_time = datetime.now(timezone.utc)
+JST = timezone(timedelta(hours=9))
 
 
 async def initialize_trailing_manager() -> None:
@@ -401,23 +405,65 @@ async def trailing_stop_loop() -> None:
             )
         logger.info("Subscriptions for trailing stop set up.")
 
-        listeners_task = asyncio.create_task(
-            hyperliquid_exchange.start_ws_listener())
-
-        logger.info("Started OHLCV WebSocket listener for trailing stop.")
-
+        # Wait indefinitely - listener is started in main()
         stop_event = asyncio.Event()
         await stop_event.wait()
     except Exception as e:
         logger.error(f"Error in trailing stop loop: {e}")
     finally:
-        if 'listeners_task' in locals():
-            listeners_task.cancel()
-            try:
-                await listeners_task
-            except asyncio.CancelledError:
-                pass
         logger.error("Trailing stop loop terminated.")
+
+
+def handle_userFills(fill_data: dict[str, Any]) -> None:
+    try:
+        fills = fill_data.get("fills", [])
+
+        for fill in fills:
+            dir = str(fill.get("dir", ""))
+            if dir.lower().find("close") != -1:
+                coin = fill.get("coin", "")
+                symbol = f"{coin}/USDC:USDC"
+                pnl = float(fill.get("closedPnl", 0))
+                fee = float(fill.get("fee", 0))
+                feeToken = fill.get("feeToken", "")
+                time = fill.get("time", 0)
+                if time > 0:
+                    import datetime
+
+                    dt_object = datetime.datetime.fromtimestamp(
+                        time / 1000, tz=timezone.utc)
+
+                    if script_launch_time < dt_object:
+                        time_str = dt_object.astimezone(
+                            JST).strftime("%Y/%m/%d %H:%M:%S")
+
+                        notification_message = f"{time_str:<20} {symbol:<18} {dir:<11} / PnL: {pnl:+.3f} USDC (Fee: {fee:.3f} {feeToken})"
+                        task = asyncio.create_task(
+                            notificator.send_notification_async(
+                                message=notification_message,
+                                files=[])
+                        )
+                        background_tasks.add(task)
+
+                        task.add_done_callback(background_tasks.discard)
+    except Exception as e:
+        logger.error(f"Error in handle_userFills: {e}")
+
+
+async def close_position_notification_loop() -> None:
+    try:
+        await hyperliquid_exchange.subscribe_userFills_ws(
+            callback=handle_userFills,
+        )
+        logger.info("Subscriptions for userFills set up.")
+
+        # Wait indefinitely - listener is started in main()
+        stop_event = asyncio.Event()
+        await stop_event.wait()
+    except Exception as e:
+        logger.error(f"Error in userFills loop: {e}")
+    finally:
+        logger.error("userFills loop terminated.")
 
 
 async def signal_check_loop() -> None:
@@ -1082,11 +1128,34 @@ async def main() -> None:
     # 起動時にTrailingManagerを初期化（既存ポジションを取得）
     await initialize_trailing_manager()
 
-    # シグナルチェックループとトレーリングストップループを並行実行
-    await asyncio.gather(
-        signal_check_loop(),
-        trailing_stop_loop(),
-    )
+    # WebSocket接続を確立（サブスクリプションの前に接続が必要）
+    if hyperliquid_exchange.ws_client.ws is None:
+        await hyperliquid_exchange.ws_client.connect()
+        logger.info("WebSocket connected before subscriptions")
+
+    # Start single WebSocket listener for all subscriptions
+    listener_task = asyncio.create_task(
+        hyperliquid_exchange.start_ws_listener())
+    logger.info("Started WebSocket listener (shared by all subscriptions)")
+
+    # Wait a bit for listener to be ready
+    await asyncio.sleep(0.5)
+
+    try:
+        # シグナルチェックループとトレーリングストップループを並行実行
+        await asyncio.gather(
+            signal_check_loop(),
+            trailing_stop_loop(),
+            close_position_notification_loop(),
+        )
+    finally:
+        # Clean up listener on exit
+        listener_task.cancel()
+        try:
+            await listener_task
+        except asyncio.CancelledError:
+            pass
+        logger.info("WebSocket listener stopped")
 
 
 if __name__ == "__main__":

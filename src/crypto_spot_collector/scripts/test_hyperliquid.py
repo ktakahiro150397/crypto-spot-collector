@@ -17,6 +17,33 @@ def handle_candle_data(candle_data: dict[str, Any]) -> None:
     print(f"Symbol: {symbol}, Highest Price: {highest_price}")
 
 
+def handle_trade_data(trade_data: dict[str, Any]) -> None:
+    print("Trade Data Received:", trade_data)
+
+
+def handle_userFills(fill_data: dict[str, Any]) -> None:
+    print("User Fills Data Received:", fill_data)
+
+    fills = fill_data.get("fills", [])
+
+    for fill in fills:
+        dir = str(fill.get("dir", ""))
+        if dir.lower().find("close") != -1:
+            coin = fill.get("coin", "")
+            symbol = f"{coin}/USDC:USDC"
+            pnl = float(fill.get("closedPnl", 0))
+            fee = float(fill.get("fee", 0))
+            feeToken = fill.get("feeToken", "")
+            time = fill.get("time", 0)
+            if time > 0:
+                import datetime
+
+                dt_object = datetime.datetime.fromtimestamp(time / 1000)
+                time_str = dt_object.strftime("%Y/%m/%d %H:%M:%S")
+                print(
+                    f"{time_str:<20} {symbol:<18} {dir:<11} | PnL: {pnl:+.3f} USDC (Fee: {fee:.3f} {feeToken})")
+
+
 async def main() -> None:
     import asyncio
     from pathlib import Path
@@ -33,28 +60,33 @@ async def main() -> None:
         take_profit_rate=secrets["settings"]["perpetual"]["take_profit_rate"],
         stop_loss_rate=secrets["settings"]["perpetual"]["stop_loss_rate"],
         leverage=secrets["settings"]["perpetual"]["leverage"],
-        testnet=False,
+        testnet=True,
     )
 
     try:
         # ws経由でティッカーの変動を受信
         perp_symbols = [
             "BTC/USDC:USDC",
-            "ETH/USDC:USDC",
-            "XRP/USDC:USDC",
-            "SOL/USDC:USDC",
-            "HYPE/USDC:USDC",
-            "ZEC/USDC:USDC",
-            "FARTCOIN/USDC:USDC",
+            # "ETH/USDC:USDC",
+            # "XRP/USDC:USDC",
+            # "SOL/USDC:USDC",
+            # "HYPE/USDC:USDC",
+            # "ZEC/USDC:USDC",
+            # "FARTCOIN/USDC:USDC",
         ]
 
         # サブスクリプションを設定
         for symbol in perp_symbols:
-            await hyperliquid_exchange.subscribe_ohlcv_ws(
-                symbol=symbol,
-                interval="1m",
-                callback=handle_candle_data,
-            )
+            # await hyperliquid_exchange.subscribe_ohlcv_ws(
+            #     symbol=symbol,
+            #     interval="1m",
+            #     callback=handle_candle_data,
+            # )
+            pass
+
+        await hyperliquid_exchange.subscribe_userFills_ws(
+            callback=handle_userFills,
+        )
 
         print("Subscriptions set up. Starting WebSocket listener...")
 

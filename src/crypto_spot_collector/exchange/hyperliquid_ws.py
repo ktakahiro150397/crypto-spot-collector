@@ -196,6 +196,54 @@ class HyperLiquidWebSocket:
         self._callbacks[sub_key] = callback
         self._subscriptions.append(subscription)
 
+    async def subscribe_trade(self,
+                              coin: str,
+                              callback: Callable[[dict[str, Any]], None]) -> None:
+        if self.ws is None:
+            raise RuntimeError(
+                "WebSocket is not connected. Call connect() first.")
+
+        subscription = {
+            "method": "subscribe",
+            "subscription": {
+                "type": "trades",
+                "coin": coin
+            }
+        }
+
+        # Send subscription message
+        await self.ws.send(json.dumps(subscription))
+        logger.info(f"Subscribed to {coin} trades")
+
+        # Store subscription and callback
+        sub_key = f"trade_{coin}"
+        self._callbacks[sub_key] = callback
+        self._subscriptions.append(subscription)
+
+    async def subscribe_userFills(self,
+                                  walletAddress: str,
+                                  callback: Callable[[dict[str, Any]], None]) -> None:
+        walletAddress = walletAddress.lower()
+        if self.ws is None:
+            raise RuntimeError(
+                "WebSocket is not connected. Call connect() first.")
+        subscription = {
+            "method": "subscribe",
+            "subscription": {
+                "type": "userFills",
+                "user": walletAddress
+            }
+        }
+
+        # Send subscription message
+        await self.ws.send(json.dumps(subscription))
+        logger.info(f"Subscribed to userFills for {walletAddress}")
+
+        # Store subscription and callback
+        sub_key = f"userFills_{walletAddress}"
+        self._callbacks[sub_key] = callback
+        self._subscriptions.append(subscription)
+
     async def unsubscribe_candle(self, coin: str, interval: str) -> None:
         """
         Unsubscribe from candle updates.
@@ -268,6 +316,41 @@ class HyperLiquidWebSocket:
                                 f"Looking for callback with key: {sub_key}")
                             if sub_key in self._callbacks:
                                 self._callbacks[sub_key](candle_data)
+                            else:
+                                logger.warning(
+                                    f"No callback found for {sub_key}. Available callbacks: {list(self._callbacks.keys())}")
+                    elif data.get("channel") == "trades":
+                        trade_data = data.get("data", [])
+                        logger.info(f"Received trade data: {trade_data}")
+                        if trade_data:
+                            # Extract coin from first trade
+                            first_trade = trade_data[0] if isinstance(
+                                trade_data, list) else trade_data
+                            coin = first_trade.get("coin")
+
+                            # Find and call the appropriate callback
+                            sub_key = f"trade_{coin}"
+                            logger.debug(
+                                f"Looking for callback with key: {sub_key}")
+                            if sub_key in self._callbacks:
+                                self._callbacks[sub_key](trade_data)
+                            else:
+                                logger.warning(
+                                    f"No callback found for {sub_key}. Available callbacks: {list(self._callbacks.keys())}")
+                    elif data.get("channel") == "userFills":
+                        user_fills_data = data.get("data", None)
+                        logger.info(
+                            f"Received userFills data: {user_fills_data}")
+                        if user_fills_data:
+                            # Extract user from first fill
+                            user = user_fills_data.get("user")
+
+                            # Find and call the appropriate callback
+                            sub_key = f"userFills_{user}"
+                            logger.debug(
+                                f"Looking for callback with key: {sub_key}")
+                            if sub_key in self._callbacks:
+                                self._callbacks[sub_key](user_fills_data)
                             else:
                                 logger.warning(
                                     f"No callback found for {sub_key}. Available callbacks: {list(self._callbacks.keys())}")

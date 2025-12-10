@@ -533,6 +533,43 @@ class HyperLiquidExchange(IExchange):
             f"Subscribed to {symbol} ({coin}) OHLCV data with {interval} interval via WebSocket"
         )
 
+    async def subscribe_trades_ws(
+        self,
+        symbol: str,
+        callback: Callable[[dict[str, Any]], None]
+    ) -> None:
+        """
+        Subscribe to trade updates via WebSocket.
+
+        Args:
+            symbol: Trading pair symbol (e.g., "XRP/USDC:USDC")
+            callback: Callback function to handle incoming trade data
+        """
+        coin = symbol.split('/')[0]
+
+        if self.ws_client.ws is None:
+            await self.ws_client.connect()
+
+        await self.ws_client.subscribe_trade(coin=coin, callback=callback)
+        logger.info(
+            f"Subscribed to {symbol} ({coin}) trade data via WebSocket"
+        )
+
+    async def subscribe_userFills_ws(
+        self,
+        callback: Callable[[dict[str, Any]], None]
+    ) -> None:
+        if self.ws_client.ws is None:
+            await self.ws_client.connect()
+
+        await self.ws_client.subscribe_userFills(
+            walletAddress=self.exchange_public.walletAddress,
+            callback=callback
+        )
+        logger.info(
+            f"Subscribed to user fills data via WebSocket (wallet: {self.exchange_public.walletAddress})"
+        )
+
     async def start_ws_listener(self) -> None:
         """
         Start listening for WebSocket messages.
