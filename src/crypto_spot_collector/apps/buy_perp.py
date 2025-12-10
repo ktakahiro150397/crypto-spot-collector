@@ -105,6 +105,10 @@ perp_symbols = [
     "HYPE/USDC:USDC",
     "ZEC/USDC:USDC",
     "FARTCOIN/USDC:USDC",
+    "LINK/USDC:USDC",
+    "AVAX/USDC:USDC",
+    "ADA/USDC:USDC",
+    "LTC/USDC:USDC",
 ]
 
 logger.info("Initializing crypto perp collector script")
