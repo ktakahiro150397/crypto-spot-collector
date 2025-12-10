@@ -1,5 +1,6 @@
 import pandas as pd
 from matplotlib import pyplot as plt
+from pyparsing import Any
 
 from crypto_spot_collector.exchange.bybit import BybitExchange
 from crypto_spot_collector.exchange.hyperliquid import HyperLiquidExchange
@@ -8,7 +9,16 @@ from crypto_spot_collector.utils.secrets import load_config
 from crypto_spot_collector.utils.trade_data import get_current_pnl_from_db
 
 
+def handle_candle_data(candle_data: dict[str, Any]) -> None:
+    coin = candle_data["s"]
+    symbol = f"{coin}/USDC:USDC"
+    highest_price = float(candle_data["h"])
+
+    print(f"Symbol: {symbol}, Highest Price: {highest_price}")
+
+
 async def main() -> None:
+    import asyncio
     from pathlib import Path
 
     # Use the secrets.json and settings.json from the apps directory
@@ -23,8 +33,58 @@ async def main() -> None:
         take_profit_rate=secrets["settings"]["perpetual"]["take_profit_rate"],
         stop_loss_rate=secrets["settings"]["perpetual"]["stop_loss_rate"],
         leverage=secrets["settings"]["perpetual"]["leverage"],
-        testnet=True,
+        testnet=False,
     )
+
+    try:
+        # ws経由でティッカーの変動を受信
+        perp_symbols = [
+            "BTC/USDC:USDC",
+            "ETH/USDC:USDC",
+            "XRP/USDC:USDC",
+            "SOL/USDC:USDC",
+            "HYPE/USDC:USDC",
+            "ZEC/USDC:USDC",
+            "FARTCOIN/USDC:USDC",
+        ]
+
+        # サブスクリプションを設定
+        for symbol in perp_symbols:
+            await hyperliquid_exchange.subscribe_ohlcv_ws(
+                symbol=symbol,
+                interval="1m",
+                callback=handle_candle_data,
+            )
+
+        print("Subscriptions set up. Starting WebSocket listener...")
+
+        # WebSocketリスナーをバックグラウンドタスクとして起動
+        listener_task = asyncio.create_task(
+            hyperliquid_exchange.start_ws_listener())
+
+        # 無限にデータを受信し続ける（Ctrl+Cで終了）
+        print("Listening for candle data... Press Ctrl+C to stop")
+
+        # 方法1: asyncio.Event を使う（推奨）
+        stop_event = asyncio.Event()
+        await stop_event.wait()  # Ctrl+Cまで永遠に待機
+
+        # 方法2: while True を使う場合
+        # while True:
+        #     await asyncio.sleep(1)  # CPU使用率を下げるため短いsleepを入れる
+
+    except KeyboardInterrupt:
+        print("\nStopping...")
+    finally:
+        # クリーンアップ
+        await hyperliquid_exchange.close()
+        if 'listener_task' in locals():
+            listener_task.cancel()
+            try:
+                await listener_task
+            except asyncio.CancelledError:
+                pass
+        print("WebSocket connection closed.")
 
     # balance = await hyperliquid_exchange.fetch_balance_async()
 
@@ -57,11 +117,11 @@ async def main() -> None:
     #     )
     #     print("Updated TP/SL Order Info:", new_tpsl_order)
 
-    positions = await hyperliquid_exchange.exchange_public.fetch_positions(["ETH/USDC:USDC"])
-    print("Positions:", positions)
+    # positions = await hyperliquid_exchange.exchange_public.fetch_positions(["ETH/USDC:USDC"])
+    # print("Positions:", positions)
 
-    from crypto_spot_collector.apps.buy_perp import initialize_trailing_manager
-    await initialize_trailing_manager()
+    # from crypto_spot_collector.apps.buy_perp import initialize_trailing_manager
+    # await initialize_trailing_manager()
 
     # result = await hyperliquid_exchange.create_order_perp_long_async(
     #     symbol="SOL/USDC:USDC",

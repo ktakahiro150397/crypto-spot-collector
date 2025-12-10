@@ -116,6 +116,7 @@ notificator = discordNotification(
 importer = HistoricalDataImporter()
 logger.info("Discord notification and historical data importer initialized")
 
+is_testnet = secrets["settings"].get("sandbox_mode", False)
 hyperliquid_exchange = HyperLiquidExchange(
     mainWalletAddress=secrets["hyperliquid"]["mainWalletAddress"],
     apiWalletAddress=secrets["hyperliquid"]["apiWalletAddress"],
@@ -123,7 +124,7 @@ hyperliquid_exchange = HyperLiquidExchange(
     take_profit_rate=secrets["settings"]["perpetual"]["take_profit_rate"],
     stop_loss_rate=secrets["settings"]["perpetual"]["stop_loss_rate"],
     leverage=secrets["settings"]["perpetual"]["leverage"],
-    testnet=False,
+    testnet=is_testnet,
 )
 logger.info("HyperLiquid exchange client initialized")
 
@@ -135,6 +136,7 @@ sar_checker = SARChecker(
 sar_direction_tracker: dict[str, str | None] = {}
 
 trailing_manager = TrailingStopManagerHyperLiquid()
+background_tasks: set[asyncio.Task] = set()
 
 
 async def initialize_trailing_manager() -> None:
@@ -351,46 +353,71 @@ def should_short(df: pd.DataFrame, threshold_percent: float) -> tuple[bool, str]
     return is_short, reason
 
 
-async def trailing_stop_loop() -> None:
-    """トレーリングストップ管理ループ: 15分ごとに実行"""
-    trailing_stop_interval = 5  # 分
-    logger.info(
-        f"Starting trailing stop loop (interval: {trailing_stop_interval} minutes)")
+def handle_ws_candle_data(candle_data: dict) -> None:
+    try:
+        coin = candle_data.get("s", "")
+        if not coin:
+            logger.error("Candle data missing 's' field")
+            return
+        symbol = f"{coin}/USDC:USDC"
 
-    while True:
-        # 次の実行時刻を計算（5分の倍数の分に実行）
-        now = datetime.now(timezone.utc)
-        current_minute = now.minute
+        highest_price = float(candle_data.get("h", 0))
+        if highest_price == 0:
+            logger.error(f"Candle data for {symbol} missing 'h' field or zero")
+            return
 
-        # 次の実行分を計算（15分の倍数: 0, 15, 30, 45）
-        next_minute = ((current_minute // trailing_stop_interval) +
-                       1) * trailing_stop_interval
+        # trailing_managerの更新を呼び出す
+        if trailing_manager.get_position(symbol=symbol) is None:
+            logger.debug(
+                f"No trailing stop position for {symbol}, skipping update")
+            return
 
-        if next_minute >= 60:
-            # 次の時間に繰り越し
-            next_run = (now + timedelta(hours=1)).replace(minute=0,
-                                                          second=0, microsecond=0)
-        else:
-            # 同じ時間内
-            next_run = now.replace(minute=next_minute, second=0, microsecond=0)
-
-        wait_seconds = (next_run - now).total_seconds()
-        logger.info(
-            f"[Trailing Stop] Waiting for {wait_seconds:.1f} seconds until next run at {next_run} UTC "
-            f"(run every {trailing_stop_interval} minutes)"
+        task = asyncio.create_task(
+            check_trailing_stop(
+                symbol=symbol,
+                current_price=highest_price,
+            )
         )
-        await asyncio.sleep(wait_seconds)
+        background_tasks.add(task)
 
-        logger.info(
-            "[Trailing Stop] Running trailing stop check for all symbols")
+        task.add_done_callback(background_tasks.discard)
+    except Exception as e:
+        logger.error(f"Error in handle_ws_candle_data: {e}")
 
-        # 各シンボルについてトレーリングストップをチェック
+
+async def trailing_stop_loop() -> None:
+    """トレーリングストップ管理ループ"""
+    logger.info(
+        "Starting trailing stop loop.")
+
+    try:
+
         for symbol in perp_symbols:
+            logger.info(f"Monitoring trailing stop for {symbol}")
+            await hyperliquid_exchange.subscribe_ohlcv_ws(
+                symbol=symbol,
+                interval="1m",
+                callback=handle_ws_candle_data,
+            )
+        logger.info("Subscriptions for trailing stop set up.")
+
+        listeners_task = asyncio.create_task(
+            hyperliquid_exchange.start_ws_listener())
+
+        logger.info("Started OHLCV WebSocket listener for trailing stop.")
+
+        stop_event = asyncio.Event()
+        await stop_event.wait()
+    except Exception as e:
+        logger.error(f"Error in trailing stop loop: {e}")
+    finally:
+        if 'listeners_task' in locals():
+            listeners_task.cancel()
             try:
-                await check_trailing_stop(symbol=f"{symbol}")
-            except Exception as e:
-                logger.error(f"[Trailing Stop] Error checking {symbol}: {e}")
-                continue
+                await listeners_task
+            except asyncio.CancelledError:
+                pass
+        logger.error("Trailing stop loop terminated.")
 
 
 async def signal_check_loop() -> None:
@@ -489,35 +516,12 @@ async def signal_check_loop() -> None:
                 continue
 
 
-async def check_trailing_stop(symbol: str) -> None:
+async def check_trailing_stop(symbol: str, current_price: float) -> None:
     position = trailing_manager.get_position(symbol=symbol)
 
     if position is None:
-        logger.info(f"No trailing stop position found for {symbol}")
+        logger.debug(f"No trailing stop position found for {symbol}")
         return
-
-    # 実際のポジションを確認（損切り/利確で決済されている可能性がある）
-    actual_positions = await hyperliquid_exchange.exchange_public.fetch_positions([symbol])
-    has_active_position = False
-
-    for pos in actual_positions:
-        contracts = pos.get('contracts', 0)
-        if contracts and float(contracts) != 0:
-            has_active_position = True
-            break
-
-    # ポジションが存在しない場合、TrailingManagerから削除
-    if not has_active_position:
-        logger.info(
-            f"Position for {symbol} has been closed (likely by TP/SL). "
-            "Removing from TrailingManager."
-        )
-        trailing_manager.remove_position(symbol=symbol)
-        return
-
-    # 現在価格を取得
-    ticker = await hyperliquid_exchange.fetch_price_async(f"{symbol}")
-    current_price = ticker["last"]
 
     updated = trailing_manager.update_stoploss_price(
         symbol=symbol,
@@ -528,6 +532,15 @@ async def check_trailing_stop(symbol: str) -> None:
         current_tp_sl_info = await hyperliquid_exchange.fetch_tp_sl_info(
             symbol=symbol,
         )
+
+        if current_tp_sl_info is None:
+            # ポジションが存在しない場合、TrailingManagerから削除
+            logger.warning(
+                f"Cannot update trailing stoploss for {symbol}: No TP/SL info found."
+                "Removing from TrailingManager."
+            )
+            trailing_manager.remove_position(symbol=symbol)
+            return
 
         await hyperliquid_exchange.create_or_update_tp_sl_async(
             symbol=symbol,

@@ -24,18 +24,23 @@ class HyperLiquidWebSocket:
         "1d", "3d", "1w", "1M"
     ]
 
-    def __init__(self, testnet: bool = False):
+    def __init__(self, testnet: bool = False, max_retries: int = 5, retry_delay: float = 5.0):
         """
         Initialize HyperLiquid WebSocket client.
 
         Args:
             testnet: Use testnet if True, mainnet if False (default)
+            max_retries: Maximum number of reconnection attempts (default: 5)
+            retry_delay: Initial delay between reconnection attempts in seconds (default: 5.0)
         """
         self.ws_url = self.WS_URL_TESTNET if testnet else self.WS_URL_MAINNET
         self.ws: Optional[WebSocketClientProtocol] = None
         self._running = False
         self._callbacks: dict[str, Callable] = {}
         self._subscriptions: list[dict[str, Any]] = []
+        self._max_retries = max_retries
+        self._retry_delay = retry_delay
+        self._reconnecting = False
 
         logger.info(
             f"Initialized HyperLiquid WebSocket client "
@@ -64,6 +69,86 @@ class HyperLiquidWebSocket:
             await self.ws.close()
             self.ws = None
             logger.info("WebSocket disconnected")
+
+    async def _reconnect(self) -> bool:
+        """
+        Attempt to reconnect to WebSocket with exponential backoff.
+
+        Returns:
+            True if reconnection was successful, False otherwise
+        """
+        if self._reconnecting:
+            logger.debug("Already attempting to reconnect")
+            return False
+
+        self._reconnecting = True
+        retry_count = 0
+        delay = self._retry_delay
+
+        try:
+            while retry_count < self._max_retries and self._running:
+                retry_count += 1
+                logger.info(
+                    f"Reconnection attempt {retry_count}/{self._max_retries}")
+
+                try:
+                    # Close existing connection if any
+                    if self.ws is not None:
+                        try:
+                            await self.ws.close()
+                        except Exception:
+                            pass
+                        self.ws = None
+
+                    # Attempt to reconnect
+                    self.ws = await websockets.connect(self.ws_url)
+                    logger.info(f"WebSocket reconnected to {self.ws_url}")
+
+                    # Restore all subscriptions
+                    await self._restore_subscriptions()
+
+                    self._reconnecting = False
+                    return True
+
+                except Exception as e:
+                    logger.warning(
+                        f"Reconnection attempt {retry_count} failed: {e}")
+                    if retry_count < self._max_retries:
+                        logger.info(
+                            f"Waiting {delay:.1f}s before next attempt...")
+                        await asyncio.sleep(delay)
+                        # Exponential backoff with max 60 seconds
+                        delay = min(delay * 2, 60.0)
+
+            logger.error(
+                f"Failed to reconnect after {self._max_retries} attempts")
+            return False
+
+        finally:
+            self._reconnecting = False
+
+    async def _restore_subscriptions(self) -> None:
+        """
+        Restore all subscriptions after reconnection.
+        """
+        if not self._subscriptions:
+            logger.debug("No subscriptions to restore")
+            return
+
+        logger.info(f"Restoring {len(self._subscriptions)} subscription(s)...")
+
+        for subscription in self._subscriptions:
+            try:
+                if self.ws is not None:
+                    await self.ws.send(json.dumps(subscription))
+                    coin = subscription["subscription"]["coin"]
+                    interval = subscription["subscription"]["interval"]
+                    logger.info(f"Restored subscription for {coin} {interval}")
+            except Exception as e:
+                logger.error(
+                    f"Failed to restore subscription {subscription}: {e}")
+
+        logger.info("Subscription restoration complete")
 
     async def subscribe_candle(
         self,
@@ -194,12 +279,31 @@ class HyperLiquidWebSocket:
                     # Send ping to keep connection alive
                     logger.debug("WebSocket receive timeout, sending ping")
                     if self.ws:
-                        await self.ws.ping()
+                        try:
+                            await self.ws.ping()
+                        except Exception as e:
+                            logger.warning(f"Failed to send ping: {e}")
+                            # Connection might be dead, trigger reconnection
+                            if self._running:
+                                logger.info("Attempting to reconnect...")
+                                if await self._reconnect():
+                                    continue
+                                else:
+                                    self._running = False
+                                    break
                     continue
                 except websockets.exceptions.ConnectionClosed:
                     logger.warning("WebSocket connection closed")
-                    self._running = False
-                    break
+                    if self._running:
+                        logger.info("Attempting to reconnect...")
+                        if await self._reconnect():
+                            continue
+                        else:
+                            self._running = False
+                            break
+                    else:
+                        self._running = False
+                        break
                 except Exception as e:
                     logger.error(
                         f"Error processing WebSocket message: {e}", exc_info=True)
