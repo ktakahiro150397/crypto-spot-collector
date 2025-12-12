@@ -912,7 +912,7 @@ async def execute_long_order(
     reason: str = "",
 ) -> None:
     """ロングオーダーを発注する。
-    
+
     同じ方向に追加注文する場合は、既存のTP/SL注文をキャンセルしてから
     新規注文を発注し、トレーリングストップの状態を引き継ぐ。
     """
@@ -930,7 +930,8 @@ async def execute_long_order(
         # 既存のTP/SL注文をキャンセル（同じ方向の追加注文時に2重注文を防ぐ）
         existing_tp_sl = await hyperliquid_exchange.fetch_tp_sl_info(symbol=symbol)
         if existing_tp_sl is not None:
-            logger.info(f"{symbol}: Canceling existing TP/SL orders before new order")
+            logger.info(
+                f"{symbol}: Canceling existing TP/SL orders before new order")
             await hyperliquid_exchange.cancel_orders_async(
                 order_ids=[
                     existing_tp_sl.take_profit_order_id,
@@ -1009,7 +1010,7 @@ async def execute_short_order(
     reason: str = "",
 ) -> None:
     """ショートオーダーを発注する。
-    
+
     同じ方向に追加注文する場合は、既存のTP/SL注文をキャンセルしてから
     新規注文を発注し、トレーリングストップの状態を引き継ぐ。
     """
@@ -1027,7 +1028,8 @@ async def execute_short_order(
         # 既存のTP/SL注文をキャンセル（同じ方向の追加注文時に2重注文を防ぐ）
         existing_tp_sl = await hyperliquid_exchange.fetch_tp_sl_info(symbol=symbol)
         if existing_tp_sl is not None:
-            logger.info(f"{symbol}: Canceling existing TP/SL orders before new order")
+            logger.info(
+                f"{symbol}: Canceling existing TP/SL orders before new order")
             await hyperliquid_exchange.cancel_orders_async(
                 order_ids=[
                     existing_tp_sl.take_profit_order_id,
