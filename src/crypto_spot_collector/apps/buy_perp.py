@@ -762,6 +762,8 @@ async def check_signal(
     sar_switched, current_sar_direction = sar_checker.check_sar_direction_switch(
         df, previous_sar_direction
     )
+    logger.warning("SAR Direction Check is always False")
+    sar_switched = False
 
     # Update the tracker with current direction
     sar_direction_tracker[symbol] = current_sar_direction
