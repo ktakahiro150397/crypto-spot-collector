@@ -16,7 +16,9 @@
             "leverage": 20,
             "take_profit_rate": 0.1,
             "stop_loss_rate": 0.1,
-            "amountByUSDC": 10.0
+            "amountByUSDC": 10.0,
+            "trailing_stop_interval_minutes": 15,
+            "trailing_stop_activation_pnl_percent": 10.0
         }
     }
 }

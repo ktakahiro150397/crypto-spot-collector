@@ -1,5 +1,5 @@
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from crypto_spot_collector.exchange.types import PositionSide
 
@@ -16,7 +16,10 @@ class TrailingStopPositionBase:
     current_stoploss_price: float
     current_af_factor: float
 
+    # トレーリングが有効化されたかどうか（PnL条件を満たした後にTrue）
+    trailing_activated: bool = field(default=False)
+
 
 @dataclass
 class TrailingStopPositionHyperLiquid(TrailingStopPositionBase):
-    stoploss_order_id: str
+    stoploss_order_id: str = field(default="")

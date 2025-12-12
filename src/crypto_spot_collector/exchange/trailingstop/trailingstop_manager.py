@@ -11,6 +11,7 @@ from crypto_spot_collector.exchange.types import PositionSide
 class TrailingStopManagerOptionHyperliquid(TypedDict):
     stoploss_order_id: str
     initial_stoploss_price: float
+    trailing_activated: bool
 
 
 class TrailingStopManagerHyperLiquid():
@@ -39,11 +40,13 @@ class TrailingStopManagerHyperLiquid():
         stoploss_order_id: str = kwargs.get("stoploss_order_id", "")
         initial_stoploss_price: float = kwargs.get(
             "initial_stoploss_price", 0.0)
+        trailing_activated: bool = kwargs.get("trailing_activated", False)
 
         if symbol in self.positions:
             logger.info(f"Overwriting Trailing Stop Position for {symbol}")
             position = self.positions[symbol]
             position.stoploss_order_id = stoploss_order_id
+            position.trailing_activated = trailing_activated
         else:
             logger.info(f"Adding Trailing Stop Position for {symbol}")
             position = TrailingStopPositionHyperLiquid(
@@ -55,6 +58,7 @@ class TrailingStopManagerHyperLiquid():
                 lowest_price=entry_price,
                 current_stoploss_price=initial_stoploss_price,
                 current_af_factor=self.initial_af_factor,
+                trailing_activated=trailing_activated,
             )
 
             self.positions[symbol] = position
@@ -77,6 +81,7 @@ class TrailingStopManagerHyperLiquid():
     ) -> bool:
         """
         Update the stoploss price for the given position based on the current price.
+        トレーリングが有効化されていない場合は更新しない。
 
         :rtype: bool Indicates whether the stoploss price was updated.
         """
@@ -87,6 +92,12 @@ class TrailingStopManagerHyperLiquid():
             return False
 
         position = self.positions[symbol]
+
+        # トレーリングが有効化されていない場合はスキップ
+        if not position.trailing_activated:
+            logger.debug(
+                f"Trailing not activated for {symbol}, skipping stoploss update")
+            return False
 
         if position.side == PositionSide.LONG:
             return self._update_long_position_stoploss_price(
@@ -99,6 +110,55 @@ class TrailingStopManagerHyperLiquid():
                 position=position,
             )
         return False
+
+    def activate_trailing(
+        self,
+        symbol: str,
+        current_price: float,
+    ) -> bool:
+        """
+        トレーリングストップを有効化し、ストップロスをエントリー価格に設定する。
+
+        Args:
+            symbol: シンボル
+            current_price: 現在価格（highest/lowest price更新用）
+
+        Returns:
+            bool: 有効化に成功した場合True
+        """
+        if symbol not in self.positions:
+            logger.warning(
+                f"Position for {symbol} not found in Trailing Stop Manager.")
+            return False
+
+        position = self.positions[symbol]
+
+        if position.trailing_activated:
+            logger.debug(f"Trailing already activated for {symbol}")
+            return False
+
+        # トレーリングを有効化
+        position.trailing_activated = True
+
+        # ストップロスをエントリー価格に設定
+        position.current_stoploss_price = position.entry_price
+
+        # 現在価格でhighest/lowest priceを更新
+        if position.side == PositionSide.LONG:
+            position.highest_price = max(position.highest_price, current_price)
+        else:
+            position.lowest_price = min(position.lowest_price, current_price)
+
+        # AF係数をリセット
+        position.current_af_factor = self.initial_af_factor
+
+        logger.info(
+            f"Activated trailing stop for {symbol}: "
+            f"stoploss set to entry price {position.entry_price:.4f}, "
+            f"AF factor reset to {self.initial_af_factor}"
+        )
+
+        return True
 
     def _update_long_position_stoploss_price(
         self,

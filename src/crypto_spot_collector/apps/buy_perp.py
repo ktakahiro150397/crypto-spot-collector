@@ -191,6 +191,15 @@ async def initialize_trailing_manager() -> None:
                     )
                     continue
 
+                # 既存ポジションのトレーリング状態を判定
+                # LONG: SL >= entry → trailing_activated = True
+                # SHORT: SL <= entry → trailing_activated = True
+                current_sl_price = tp_sl_info.stop_loss_trigger_price
+                if position_side == PositionSide.LONG:
+                    trailing_activated = current_sl_price >= entry_price
+                else:  # SHORT
+                    trailing_activated = current_sl_price <= entry_price
+
                 # TrailingManagerにポジションを登録
                 trailing_manager.add_or_update_position(
                     symbol=symbol,
@@ -198,13 +207,15 @@ async def initialize_trailing_manager() -> None:
                     entry_price=entry_price,
                     stoploss_order_id=tp_sl_info.stop_loss_order_id,
                     initial_stoploss_price=tp_sl_info.stop_loss_trigger_price,
+                    trailing_activated=trailing_activated,
                 )
 
                 initialized_count += 1
                 logger.info(
                     f"Initialized TrailingManager for {symbol}: "
                     f"side={position_side.value}, entry={entry_price:.4f}, "
-                    f"initial_sl={tp_sl_info.stop_loss_trigger_price:.4f}"
+                    f"initial_sl={tp_sl_info.stop_loss_trigger_price:.4f}, "
+                    f"trailing_activated={trailing_activated}"
                 )
 
             except Exception as e:
@@ -363,61 +374,149 @@ def should_short(df: pd.DataFrame, threshold_percent: float) -> tuple[bool, str]
     return is_short, reason
 
 
-def handle_ws_candle_data(candle_data: dict) -> None:
-    try:
-        coin = candle_data.get("s", "")
-        if not coin:
-            logger.error("Candle data missing 's' field")
-            return
-        symbol = f"{coin}/USDC:USDC"
-
-        highest_price = float(candle_data.get("h", 0))
-        if highest_price == 0:
-            logger.error(f"Candle data for {symbol} missing 'h' field or zero")
-            return
-
-        # trailing_managerの更新を呼び出す
-        if trailing_manager.get_position(symbol=symbol) is None:
-            logger.debug(
-                f"No trailing stop position for {symbol}, skipping update")
-            return
-
-        task = asyncio.create_task(
-            check_trailing_stop(
-                symbol=symbol,
-                current_price=highest_price,
-            )
-        )
-        background_tasks.add(task)
-
-        task.add_done_callback(background_tasks.discard)
-    except Exception as e:
-        logger.error(f"Error in handle_ws_candle_data: {e}")
-
-
 async def trailing_stop_loop() -> None:
-    """トレーリングストップ管理ループ"""
+    """
+    トレーリングストップ管理ループ: 設定された間隔（デフォルト15分）ごとに実行。
+    毎時0, 15, 30, 45分などに実行される。
+    """
+    # 設定から間隔と有効化PnL閾値を取得
+    interval_minutes = secrets["settings"]["perpetual"].get(
+        "trailing_stop_interval_minutes", 15)
+    activation_pnl_percent = secrets["settings"]["perpetual"].get(
+        "trailing_stop_activation_pnl_percent", 10.0)
+
     logger.info(
-        "Starting trailing stop loop.")
+        f"Starting trailing stop loop. "
+        f"Interval: {interval_minutes} minutes, "
+        f"Activation PnL: {activation_pnl_percent}%"
+    )
 
-    try:
+    while True:
+        try:
+            # 次の実行時刻まで待機（interval_minutesの倍数の分に実行）
+            now = datetime.now(timezone.utc)
+            current_minute = now.minute
 
-        for symbol in perp_symbols:
-            logger.info(f"Monitoring trailing stop for {symbol}")
-            await hyperliquid_exchange.subscribe_ohlcv_ws(
-                symbol=symbol,
-                interval="1m",
-                callback=handle_ws_candle_data,
+            # 次の実行分を計算（interval_minutesの倍数: 0, 15, 30, 45など）
+            next_minute = (
+                (current_minute // interval_minutes) + 1) * interval_minutes
+
+            if next_minute >= 60:
+                # 次の時間に繰り越し
+                next_run = (now + timedelta(hours=1)).replace(
+                    minute=0, second=0, microsecond=0)
+            else:
+                # 同じ時間内
+                next_run = now.replace(
+                    minute=next_minute, second=0, microsecond=0)
+
+            wait_seconds = (next_run - now).total_seconds()
+            logger.debug(
+                f"[Trailing Stop] Waiting {wait_seconds:.1f}s until {next_run} UTC"
             )
-        logger.info("Subscriptions for trailing stop set up.")
+            await asyncio.sleep(wait_seconds)
 
-        # Wait indefinitely - listener is started in main()
-        stop_event = asyncio.Event()
-        await stop_event.wait()
+            # 全ポジションを取得してトレーリングストップをチェック
+            logger.info(
+                "[Trailing Stop] Checking positions for trailing stop updates...")
+
+            positions = await hyperliquid_exchange.exchange_public.fetch_positions()
+
+            for pos in positions:
+                contracts = pos.get('contracts', 0)
+                if not contracts or float(contracts) == 0:
+                    continue
+
+                symbol = pos.get('symbol')
+                if symbol not in perp_symbols:
+                    continue
+
+                pnl_percent = pos.get('percentage', 0)
+                entry_price = float(pos.get('entryPrice', 0))
+
+                # TrailingManagerにポジションが登録されているか確認
+                trailing_position = trailing_manager.get_position(
+                    symbol=symbol)
+                if trailing_position is None:
+                    logger.debug(
+                        f"[Trailing Stop] {symbol}: Not in TrailingManager, skipping")
+                    continue
+
+                # PnLチェック
+                if pnl_percent < activation_pnl_percent:
+                    logger.debug(
+                        f"[Trailing Stop] {symbol}: PnL {pnl_percent:.2f}% < "
+                        f"{activation_pnl_percent}%, skipping"
+                    )
+                    continue
+
+                # PnL条件を満たした
+                logger.info(
+                    f"[Trailing Stop] {symbol}: PnL {pnl_percent:.2f}% >= "
+                    f"{activation_pnl_percent}%"
+                )
+
+                # 現在価格を取得
+                ticker = await hyperliquid_exchange.fetch_price_async(symbol)
+                current_price = float(ticker['last'])
+
+                # トレーリングが未有効化の場合、有効化する
+                if not trailing_position.trailing_activated:
+                    activated = trailing_manager.activate_trailing(
+                        symbol=symbol,
+                        current_price=current_price,
+                    )
+                    if activated:
+                        # ストップロス注文を更新（エントリー価格に設定）
+                        await update_stoploss_order(
+                            symbol=symbol,
+                            position=trailing_position,
+                        )
+                else:
+                    # トレーリング有効化済み：通常のトレーリング更新
+                    await check_trailing_stop(
+                        symbol=symbol,
+                        current_price=current_price,
+                    )
+
+        except Exception as e:
+            logger.error(f"Error in trailing stop loop: {e}")
+            # エラー発生時も継続
+            await asyncio.sleep(60)
+
+
+async def update_stoploss_order(
+    symbol: str,
+    position: Any,
+) -> None:
+    """ストップロス注文を更新する（トレーリング有効化時）"""
+    try:
+        current_tp_sl_info = await hyperliquid_exchange.fetch_tp_sl_info(
+            symbol=symbol,
+        )
+
+        if current_tp_sl_info is None:
+            logger.warning(
+                f"Cannot update stoploss for {symbol}: No TP/SL info found. "
+                "Removing from TrailingManager."
+            )
+            trailing_manager.remove_position(symbol=symbol)
+            return
+
+        await hyperliquid_exchange.create_or_update_tp_sl_async(
+            symbol=symbol,
+            side=position.side,
+            takeprofit_order_id=current_tp_sl_info.take_profit_order_id,
+            stoploss_order_id=current_tp_sl_info.stop_loss_order_id,
+            take_profit_trigger_price=current_tp_sl_info.take_profit_trigger_price,
+            stop_loss_trigger_price=position.current_stoploss_price,
+        )
+        logger.info(
+            f"[Trailing Stop] Activated and updated stoploss for {symbol} "
+            f"to entry price {position.current_stoploss_price:.4f}"
+        )
     except Exception as e:
-        logger.error(f"Error in trailing stop loop: {e}")
-    finally:
-        logger.error("Trailing stop loop terminated.")
+        logger.error(f"Error updating stoploss order for {symbol}: {e}")
 
 
 def handle_userFills(fill_data: dict[str, Any]) -> None:
