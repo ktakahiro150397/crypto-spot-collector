@@ -5,6 +5,9 @@ from pyparsing import Any
 from crypto_spot_collector.exchange.bybit import BybitExchange
 from crypto_spot_collector.exchange.hyperliquid import HyperLiquidExchange
 from crypto_spot_collector.exchange.types import PositionSide
+from crypto_spot_collector.utils.close_position_notification import (
+    close_position_notification_message,
+)
 from crypto_spot_collector.utils.secrets import load_config
 from crypto_spot_collector.utils.trade_data import get_current_pnl_from_db
 
@@ -39,9 +42,16 @@ def handle_userFills(fill_data: dict[str, Any]) -> None:
                 import datetime
 
                 dt_object = datetime.datetime.fromtimestamp(time / 1000)
-                time_str = dt_object.strftime("%Y/%m/%d %H:%M:%S")
-                print(
-                    f"{time_str:<20} {symbol:<18} {dir:<11} | PnL: {pnl:+.3f} USDC (Fee: {fee:.3f} {feeToken})")
+
+                notification_message = close_position_notification_message(
+                    close_date_utc=dt_object,
+                    symbol=symbol,
+                    direction=dir,
+                    pnl=pnl,
+                    fee=fee,
+                    feeToken=feeToken,
+                )
+                print(notification_message)
 
 
 async def main() -> None:

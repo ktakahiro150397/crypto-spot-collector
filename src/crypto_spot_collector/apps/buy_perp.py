@@ -21,6 +21,9 @@ from crypto_spot_collector.exchange.trailingstop.trailingstop_manager import (
 from crypto_spot_collector.exchange.types import PositionSide
 from crypto_spot_collector.notification.discord import discordNotification
 from crypto_spot_collector.providers.market_data_provider import MarketDataProvider
+from crypto_spot_collector.utils.close_position_notification import (
+    close_position_notification_message,
+)
 from crypto_spot_collector.utils.secrets import load_config
 
 # ログ設定
@@ -143,8 +146,7 @@ sar_direction_tracker: dict[str, str | None] = {}
 trailing_manager = TrailingStopManagerHyperLiquid()
 background_tasks: set[asyncio.Task] = set()
 
-script_launch_time = datetime.now(timezone.utc)
-JST = timezone(timedelta(hours=9))
+last_close_position_notification_time = datetime.now(timezone.utc)
 
 
 async def initialize_trailing_manager() -> None:
@@ -419,37 +421,61 @@ async def trailing_stop_loop() -> None:
 
 
 def handle_userFills(fill_data: dict[str, Any]) -> None:
+    global last_close_position_notification_time
     try:
         fills = fill_data.get("fills", [])
 
-        for fill in fills:
-            dir = str(fill.get("dir", ""))
-            if dir.lower().find("close") != -1:
-                coin = fill.get("coin", "")
-                symbol = f"{coin}/USDC:USDC"
-                pnl = float(fill.get("closedPnl", 0))
-                fee = float(fill.get("fee", 0))
-                feeToken = fill.get("feeToken", "")
-                time = fill.get("time", 0)
-                if time > 0:
-                    import datetime
+        # クローズポジションのみを抽出
+        close_fills = [
+            fill for fill in fills
+            if str(fill.get("dir", "")).lower().find("close") != -1
+        ]
 
-                    dt_object = datetime.datetime.fromtimestamp(
-                        time / 1000, tz=timezone.utc)
+        if not close_fills:
+            return
 
-                    if script_launch_time < dt_object:
-                        time_str = dt_object.astimezone(
-                            JST).strftime("%Y/%m/%d %H:%M:%S")
+        # 最新のクローズポジションを取得（タイムスタンプでソート）
+        latest_fill = max(close_fills, key=lambda x: x.get("time", 0))
 
-                        notification_message = f"{time_str:<20} {symbol:<18} {dir:<11} / PnL: {pnl:+.3f} USDC (Fee: {fee:.3f} {feeToken})"
-                        task = asyncio.create_task(
-                            notificator.send_notification_async(
-                                message=notification_message,
-                                files=[])
-                        )
-                        background_tasks.add(task)
+        time = latest_fill.get("time", 0)
+        if time > 0:
+            import datetime
 
-                        task.add_done_callback(background_tasks.discard)
+            dt_object = datetime.datetime.fromtimestamp(
+                time / 1000, tz=timezone.utc)
+
+            # 既に通知済みの場合はスキップ
+            if last_close_position_notification_time >= dt_object:
+                logger.debug(
+                    f"Skipping notification for {dt_object} (already notified)")
+                return
+
+            # 通知処理
+            coin = latest_fill.get("coin", "")
+            symbol = f"{coin}/USDC:USDC"
+            pnl = float(latest_fill.get("closedPnl", 0))
+            fee = float(latest_fill.get("fee", 0))
+            feeToken = latest_fill.get("feeToken", "")
+            dir = str(latest_fill.get("dir", ""))
+
+            notification_message = close_position_notification_message(
+                close_date_utc=dt_object,
+                symbol=symbol,
+                direction=dir,
+                pnl=pnl,
+                fee=fee,
+                feeToken=feeToken,
+            )
+
+            task = asyncio.create_task(
+                notificator.send_notification_async(
+                    message=notification_message,
+                    files=[])
+            )
+            background_tasks.add(task)
+
+            task.add_done_callback(background_tasks.discard)
+            last_close_position_notification_time = dt_object
     except Exception as e:
         logger.error(f"Error in handle_userFills: {e}")
 
