@@ -24,7 +24,9 @@
             "stop_loss_rate": 0.3,
             "amountByUSDC": 150.0,
             "consecutivePositiveCount": 4,
-            "price_change_threshold_percent": 999
+            "price_change_threshold_percent": 999,
+            "trailing_stop_interval_minutes": 5,
+            "trailing_stop_activation_pnl_percent": 10.0
         },
         "sandbox_mode": false
     }
