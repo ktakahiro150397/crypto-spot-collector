@@ -339,7 +339,7 @@ class HyperLiquidWebSocket:
                                     f"No callback found for {sub_key}. Available callbacks: {list(self._callbacks.keys())}")
                     elif data.get("channel") == "userFills":
                         user_fills_data = data.get("data", None)
-                        logger.info(
+                        logger.debug(
                             f"Received userFills data: {user_fills_data}")
                         if user_fills_data:
                             # Extract user from first fill
