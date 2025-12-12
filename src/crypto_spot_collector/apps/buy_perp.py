@@ -72,13 +72,13 @@ if CUSTOM_FONT_PATH and Path(CUSTOM_FONT_PATH).exists():
     font_manager.fontManager.addfont(CUSTOM_FONT_PATH)
     custom_font = font_manager.FontProperties(fname=CUSTOM_FONT_PATH)
     plt.rcParams["font.family"] = custom_font.get_name()
-    print(f"カスタムフォントを使用: {custom_font.get_name()}")
+    logger.info(f"カスタムフォントを使用: {custom_font.get_name()}")
 else:
     # デフォルトフォント（システムフォント）
     plt.rcParams["font.family"] = "sans-serif"
     plt.rcParams["font.sans-serif"] = ["Arial", "Helvetica", "DejaVu Sans"]
     if CUSTOM_FONT_PATH:
-        print(
+        logger.warning(
             f"警告: {CUSTOM_FONT_PATH} が見つかりません。デフォルトフォントを使用します。"
         )
 

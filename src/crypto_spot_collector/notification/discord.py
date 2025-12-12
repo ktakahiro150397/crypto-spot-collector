@@ -2,6 +2,7 @@ import json
 from io import BytesIO, TextIOWrapper
 
 import requests
+from loguru import logger
 
 from crypto_spot_collector.notification.NotificationBase import NotificationBase
 
@@ -25,15 +26,14 @@ class discordNotification(NotificationBase):
 
         payloadFiles = [(f"file_{i}", (file.name, file, "image/png"))
                         for i, file in enumerate(files)]
-        print(payloadFiles)
-
         response = requests.post(self.webhook_url,
                                  data={
                                      "payload_json": json.dumps(payload),
                                  },
                                  files=payloadFiles)
-        print(response.status_code)
-        pass
+        logger.debug(f"send_notification_async : {response.status_code}")
+        if response.status_code != 200:
+            logger.error(f"Error: {response.text}")
 
     async def send_notification_with_image_async(
             self,
@@ -62,9 +62,9 @@ class discordNotification(NotificationBase):
             files=files
         )
 
-        print(f"Discord notification sent: {response.status_code}")
+        logger.debug(f"Discord notification sent: {response.status_code}")
         if response.status_code != 200:
-            print(f"Error: {response.text}")
+            logger.error(f"Error: {response.text}")
 
         return bool(response.status_code == 200)
 
@@ -91,9 +91,10 @@ class discordNotification(NotificationBase):
             files=files
         )
 
-        print(f"Discord notification with embed sent: {response.status_code}")
+        logger.debug(
+            f"Discord notification with embed sent: {response.status_code}")
         if response.status_code != 200:
-            print(f"Error: {response.text}")
+            logger.error(f"Error: {response.text}")
         return bool(response.status_code == 200)
 
     def embed_object_create_helper(symbol: str,

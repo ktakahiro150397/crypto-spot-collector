@@ -384,11 +384,9 @@ class HyperLiquidExchange(IExchange):
         stop_loss_orders = [
             order for order in current_orders if order.get("info", {}).get("orderType") == "Stop Market"
         ]
-        print("Current Stop Loss Orders:", stop_loss_orders)
         take_profit_orders = [
             order for order in current_orders if order.get("info", {}).get("orderType") == "Take Profit Market"
         ]
-        print("Current Take Profit Orders:", take_profit_orders)
 
         if not stop_loss_orders or not take_profit_orders:
             logger.debug(f"No TP/SL orders found for symbol {symbol}")
