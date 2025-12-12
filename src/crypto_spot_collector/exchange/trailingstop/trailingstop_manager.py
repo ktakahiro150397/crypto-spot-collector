@@ -43,12 +43,26 @@ class TrailingStopManagerHyperLiquid():
         trailing_activated: bool = kwargs.get("trailing_activated", False)
 
         if symbol in self.positions:
-            logger.info(f"Overwriting Trailing Stop Position for {symbol}")
-            position = self.positions[symbol]
-            position.stoploss_order_id = stoploss_order_id
-            position.trailing_activated = trailing_activated
+            # 既存ポジションがある場合は、重要な状態を引き継ぐ
+            existing_position = self.positions[symbol]
+            logger.info(
+                f"Updating Trailing Stop Position for {symbol} - "
+                f"preserving trailing state: activated={existing_position.trailing_activated}, "
+                f"af_factor={existing_position.current_af_factor}, "
+                f"highest={existing_position.highest_price}, lowest={existing_position.lowest_price}"
+            )
+            # オーダーIDのみ更新（必須）
+            existing_position.stoploss_order_id = stoploss_order_id
+            # trailing_activatedは引数で明示的に指定されていなければ既存を維持
+            # ※ kwargsに指定がない場合はFalseになるが、既存を優先
+            if "trailing_activated" not in kwargs:
+                # 引数で明示されていなければ既存の状態を維持
+                pass
+            else:
+                existing_position.trailing_activated = trailing_activated
+            # entry_price, side, current_af_factor, highest/lowest_price, current_stoploss_price は維持
         else:
-            logger.info(f"Adding Trailing Stop Position for {symbol}")
+            logger.info(f"Adding new Trailing Stop Position for {symbol}")
             position = TrailingStopPositionHyperLiquid(
                 symbol=symbol,
                 side=side,

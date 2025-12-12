@@ -911,7 +911,11 @@ async def execute_long_order(
     amountByUSDC: float,
     reason: str = "",
 ) -> None:
-    """ロングオーダーを発注する。"""
+    """ロングオーダーを発注する。
+    
+    同じ方向に追加注文する場合は、既存のTP/SL注文をキャンセルしてから
+    新規注文を発注し、トレーリングストップの状態を引き継ぐ。
+    """
     logger.info(f"{symbol}: Long signal detected! Placing long order...")
     logger.info(f"{symbol}: Reason: {reason}")
 
@@ -923,7 +927,19 @@ async def execute_long_order(
         # 注文数量を計算
         amount = amountByUSDC / current_price
 
-        # ロングオーダー発注
+        # 既存のTP/SL注文をキャンセル（同じ方向の追加注文時に2重注文を防ぐ）
+        existing_tp_sl = await hyperliquid_exchange.fetch_tp_sl_info(symbol=symbol)
+        if existing_tp_sl is not None:
+            logger.info(f"{symbol}: Canceling existing TP/SL orders before new order")
+            await hyperliquid_exchange.cancel_orders_async(
+                order_ids=[
+                    existing_tp_sl.take_profit_order_id,
+                    existing_tp_sl.stop_loss_order_id,
+                ],
+                symbol=symbol,
+            )
+
+        # ロングオーダー発注（新しいTP/SL注文が作成される）
         order_result = await hyperliquid_exchange.create_order_perp_long_async(
             symbol=f"{symbol}",
             amount=amount,
@@ -932,7 +948,7 @@ async def execute_long_order(
         logger.success(f"Successfully created long order for {symbol}")
 
         # トレーリングストップ管理の更新
-        # 新規ポジション登録
+        # 既存ポジションがあればトレーリング状態を引き継ぎ、オーダーIDのみ更新
         current_tp_sl_info = await hyperliquid_exchange.fetch_tp_sl_info(
             symbol=symbol,
         )
@@ -942,6 +958,7 @@ async def execute_long_order(
             entry_price=current_price,
             stoploss_order_id=current_tp_sl_info.stop_loss_order_id,
             initial_stoploss_price=current_tp_sl_info.stop_loss_trigger_price,
+            # trailing_activatedは指定しないことで、既存の状態を引き継ぐ
         )
 
         # Discord通知
@@ -991,7 +1008,11 @@ async def execute_short_order(
     amountByUSDC: float,
     reason: str = "",
 ) -> None:
-    """ショートオーダーを発注する。"""
+    """ショートオーダーを発注する。
+    
+    同じ方向に追加注文する場合は、既存のTP/SL注文をキャンセルしてから
+    新規注文を発注し、トレーリングストップの状態を引き継ぐ。
+    """
     logger.info(f"{symbol}: Short signal detected! Placing short order...")
     logger.info(f"{symbol}: Reason: {reason}")
 
@@ -1003,7 +1024,19 @@ async def execute_short_order(
         # 注文数量を計算
         amount = amountByUSDC / current_price
 
-        # ショートオーダー発注
+        # 既存のTP/SL注文をキャンセル（同じ方向の追加注文時に2重注文を防ぐ）
+        existing_tp_sl = await hyperliquid_exchange.fetch_tp_sl_info(symbol=symbol)
+        if existing_tp_sl is not None:
+            logger.info(f"{symbol}: Canceling existing TP/SL orders before new order")
+            await hyperliquid_exchange.cancel_orders_async(
+                order_ids=[
+                    existing_tp_sl.take_profit_order_id,
+                    existing_tp_sl.stop_loss_order_id,
+                ],
+                symbol=symbol,
+            )
+
+        # ショートオーダー発注（新しいTP/SL注文が作成される）
         order_result = await hyperliquid_exchange.create_order_perp_short_async(
             symbol=f"{symbol}",
             amount=amount,
@@ -1012,7 +1045,7 @@ async def execute_short_order(
         logger.success(f"Successfully created short order for {symbol}")
 
         # トレーリングストップ管理の更新
-        # 新規ポジション登録
+        # 既存ポジションがあればトレーリング状態を引き継ぎ、オーダーIDのみ更新
         current_tp_sl_info = await hyperliquid_exchange.fetch_tp_sl_info(
             symbol=symbol,
         )
@@ -1023,6 +1056,7 @@ async def execute_short_order(
             entry_price=current_price,
             stoploss_order_id=current_tp_sl_info.stop_loss_order_id,
             initial_stoploss_price=current_tp_sl_info.stop_loss_trigger_price,
+            # trailing_activatedは指定しないことで、既存の状態を引き継ぐ
         )
 
         # Discord通知
