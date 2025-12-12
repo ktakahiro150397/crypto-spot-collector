@@ -74,6 +74,10 @@ class TrailingStopManagerHyperLiquid():
             logger.warning(
                 f"Attempted to remove non-existent position for {symbol}")
 
+    def clear_positions(self) -> None:
+        self.positions.clear()
+        logger.info("Cleared all Trailing Stop Positions")
+
     def update_stoploss_price(
         self,
         symbol: str,

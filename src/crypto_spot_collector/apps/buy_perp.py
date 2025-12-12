@@ -8,6 +8,7 @@ from typing import Any
 import matplotlib.dates as mdates
 import pandas as pd
 import seaborn as sns
+from ccxt.base.types import Position
 from loguru import logger
 from matplotlib import font_manager
 from matplotlib import pyplot as plt
@@ -154,6 +155,8 @@ async def initialize_trailing_manager() -> None:
     logger.info("Initializing TrailingManager with existing positions...")
 
     try:
+        trailing_manager.clear_positions()
+
         # 全シンボルの既存ポジションを取得
         all_positions = await hyperliquid_exchange.exchange_public.fetch_positions()
 
@@ -231,6 +234,65 @@ async def initialize_trailing_manager() -> None:
     except Exception as e:
         logger.error(f"Error during TrailingManager initialization: {e}")
         # 初期化に失敗しても続行（新規ポジションから管理開始）
+
+
+async def sync_trailing_position(positions: list[Position]) -> None:
+    try:
+        logger.debug(
+            "Synchronizing TrailingManager positions with current Hyperliquid order state...")
+
+        synced_count = 0
+        for pos in positions:
+            contracts = pos.get('contracts', 0)
+            if not contracts or float(contracts) == 0:
+                continue
+
+            symbol = pos.get('symbol')
+            if symbol not in perp_symbols:
+                continue
+
+            position_side_str = pos.get('side')  # 'long' or 'short'
+            entry_price = float(pos.get('entryPrice', 0))
+
+            if position_side_str == 'long':
+                position_side = PositionSide.LONG
+            elif position_side_str == 'short':
+                position_side = PositionSide.SHORT
+            else:
+                continue
+
+            # TP/SL注文情報を取得
+            tp_sl_info = await hyperliquid_exchange.fetch_tp_sl_info(symbol=symbol)
+            if tp_sl_info is None:
+                logger.warning(
+                    f"No TP/SL orders found for {symbol}, remove Trailing Stop Position.")
+                trailing_manager.remove_position(symbol=symbol)
+                continue
+
+            # 既存ポジションのトレーリング状態を判定
+            # LONG: SL >= entry → trailing_activated = True
+            # SHORT: SL <= entry → trailing_activated = True
+            current_sl_price = tp_sl_info.stop_loss_trigger_price
+            if position_side == PositionSide.LONG:
+                trailing_activated = current_sl_price >= entry_price
+            else:  # SHORT
+                trailing_activated = current_sl_price <= entry_price
+
+            # TrailingManagerのポジションを更新
+            trailing_manager.add_or_update_position(
+                symbol=symbol,
+                side=position_side,
+                entry_price=entry_price,
+                stoploss_order_id=tp_sl_info.stop_loss_order_id,
+                initial_stoploss_price=tp_sl_info.stop_loss_trigger_price,
+                trailing_activated=trailing_activated,
+            )
+            synced_count += 1
+
+        logger.debug(f"Sync complete. Updated {synced_count} position(s).")
+
+    except Exception as e:
+        logger.error(f"Error during TrailingManager synchronization: {e}")
 
 
 def check_price_change_signal(
@@ -421,6 +483,7 @@ async def trailing_stop_loop() -> None:
                 "[Trailing Stop] Checking positions for trailing stop updates...")
 
             positions = await hyperliquid_exchange.exchange_public.fetch_positions()
+            await sync_trailing_position(positions=positions)
 
             for pos in positions:
                 contracts = pos.get('contracts', 0)
@@ -474,6 +537,11 @@ async def trailing_stop_loop() -> None:
                             symbol=symbol,
                             position=trailing_position,
                         )
+                        trailing_notification_message = (
+                            f"{symbol} : 損失なしのトレーリングストップが有効です！やったね！"
+                        )
+                        await notificator.send_notification_async(message=trailing_notification_message,
+                                                                  files=[])
                 else:
                     # トレーリング有効化済み：通常のトレーリング更新
                     await check_trailing_stop(
