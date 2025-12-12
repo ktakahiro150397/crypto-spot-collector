@@ -296,13 +296,13 @@ class HyperLiquidWebSocket:
 
                     # Handle subscription response
                     if data.get("channel") == "subscriptionResponse":
-                        logger.info(f"Subscription confirmed: {data}")
+                        logger.debug(f"Subscription confirmed: {data}")
                         continue
 
                     # Handle candle data
                     if data.get("channel") == "candle":
                         candle_data = data.get("data", [])
-                        logger.info(f"Received candle data: {candle_data}")
+                        logger.debug(f"Received candle data: {candle_data}")
                         if candle_data:
                             # Extract coin and interval from first candle
                             first_candle = candle_data[0] if isinstance(
@@ -321,7 +321,7 @@ class HyperLiquidWebSocket:
                                     f"No callback found for {sub_key}. Available callbacks: {list(self._callbacks.keys())}")
                     elif data.get("channel") == "trades":
                         trade_data = data.get("data", [])
-                        logger.info(f"Received trade data: {trade_data}")
+                        logger.debug(f"Received trade data: {trade_data}")
                         if trade_data:
                             # Extract coin from first trade
                             first_trade = trade_data[0] if isinstance(

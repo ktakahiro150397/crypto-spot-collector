@@ -391,7 +391,7 @@ class HyperLiquidExchange(IExchange):
         print("Current Take Profit Orders:", take_profit_orders)
 
         if not stop_loss_orders or not take_profit_orders:
-            logger.info(f"No TP/SL orders found for symbol {symbol}")
+            logger.debug(f"No TP/SL orders found for symbol {symbol}")
             return None
 
         stoploss_order_id = stop_loss_orders[0].get("id", "")

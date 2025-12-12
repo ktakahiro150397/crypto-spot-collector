@@ -42,7 +42,7 @@ logger.remove()
 logger.add(
     sink=sys.stdout,
     format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> | <cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> - <level>{message}</level>",
-    level="DEBUG",
+    level="INFO",
     colorize=True,
 )
 
@@ -50,7 +50,7 @@ logger.add(
 logger.add(
     sink=log_file,
     format="{time:YYYY-MM-DD HH:mm:ss} | {level: <8} | {name}:{function}:{line} - {message}",
-    level="INFO",
+    level="DEBUG",
     rotation="00:00",  # 毎日0時にローテーション
     retention="30 days",  # 30日間保持
     compression="zip",  # 古いログファイルをzip圧縮
@@ -301,13 +301,13 @@ def should_long(df: pd.DataFrame, threshold_percent: float) -> tuple[bool, str]:
     """
     # SARシグナルチェック
     is_long_sar = sar_checker.check_long(df)
-    logger.info(f"should_long: SAR long signal: {is_long_sar}")
+    logger.debug(f"should_long: SAR long signal: {is_long_sar}")
 
     # 価格変動率シグナルチェック
     is_long_price, _, price_change_pct, price_reason = check_price_change_signal(
         df, threshold_percent
     )
-    logger.info(f"should_long: Price change long signal: {is_long_price}")
+    logger.debug(f"should_long: Price change long signal: {is_long_price}")
 
     # いずれかのシグナルが発生した場合にロング
     is_long = is_long_sar or is_long_price
@@ -340,13 +340,13 @@ def should_short(df: pd.DataFrame, threshold_percent: float) -> tuple[bool, str]
     """
     # SARシグナルチェック
     is_short_sar = sar_checker.check_short(df)
-    logger.info(f"should_short: SAR short signal: {is_short_sar}")
+    logger.debug(f"should_short: SAR short signal: {is_short_sar}")
 
     # 価格変動率シグナルチェック
     _, is_short_price, price_change_pct, price_reason = check_price_change_signal(
         df, threshold_percent
     )
-    logger.info(f"should_short: Price change short signal: {is_short_price}")
+    logger.debug(f"should_short: Price change short signal: {is_short_price}")
 
     # いずれかのシグナルが発生した場合にショート
     is_short = is_short_sar or is_short_price
@@ -521,7 +521,7 @@ async def signal_check_loop() -> None:
     while True:
         # 次の実行時刻まで待機処理
         now = datetime.now(timezone.utc)
-        logger.info(f"Current time: {now}")
+        logger.debug(f"Current time: {now}")
 
         run_minute = int(timeframe_perp.replace("m", ""))
 
@@ -541,7 +541,7 @@ async def signal_check_loop() -> None:
             next_run = now.replace(minute=next_minute, second=0, microsecond=0)
 
         wait_seconds = (next_run - now).total_seconds()
-        logger.info(
+        logger.debug(
             f"Waiting for {wait_seconds:.1f} seconds until next run at {next_run} UTC "
             f"(run every {run_minute} minutes: 0, {run_minute}, {run_minute*2}, ...)"
         )
@@ -667,10 +667,16 @@ async def check_signal(
     # Update the tracker with current direction
     sar_direction_tracker[symbol] = current_sar_direction
 
-    logger.info(
-        f"{symbol}: SAR direction - Previous: {previous_sar_direction}, "
-        f"Current: {current_sar_direction}, Switched: {sar_switched}"
-    )
+    if sar_switched:
+        logger.info(
+            f"{symbol}: SAR direction switched - Previous: {previous_sar_direction}, "
+            f"Current: {current_sar_direction}"
+        )
+    else:
+        logger.debug(
+            f"{symbol}: SAR direction - Previous: {previous_sar_direction}, "
+            f"Current: {current_sar_direction}"
+        )
 
     # If SAR direction switched, close all positions
     if sar_switched:
@@ -701,10 +707,13 @@ async def check_signal(
     long_signal, long_reason = should_long(df, threshold_percent)
     short_signal, short_reason = should_short(df, threshold_percent)
 
-    logger.info(
-        f"{symbol}: Long Signal: {long_signal} ({long_reason}), "
-        f"Short Signal: {short_signal} ({short_reason})"
-    )
+    if long_signal or short_signal:
+        logger.info(
+            f"{symbol}: Long Signal: {long_signal} ({long_reason}), "
+            f"Short Signal: {short_signal} ({short_reason})"
+        )
+    else:
+        logger.debug(f"{symbol}: No signal detected")
 
     if long_signal:
         await execute_long_order(
@@ -722,8 +731,6 @@ async def check_signal(
             amountByUSDC=amountByUSDC,
             reason=short_reason,
         )
-    else:
-        logger.debug(f"{symbol}: No signal detected.")
 
 
 async def execute_long_order(
