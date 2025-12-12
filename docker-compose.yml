@@ -73,10 +73,20 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
       - portainer_data:/data
 
+  dozzle:
+    image: amir20/dozzle:latest
+    container_name: dozzle
+    restart: unless-stopped
+    ports:
+      - "9001:8080"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    environment:
+      - DOZZLE_LEVEL=debug # 表示するログレベル (debug, info, warn, error)
+
 volumes:
   mysql-data:
   portainer_data:
-
 
 networks:
   crypto-network:
