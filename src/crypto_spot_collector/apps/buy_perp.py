@@ -274,9 +274,17 @@ async def sync_trailing_position(positions: list[Position]) -> None:
             # SHORT: SL <= entry → trailing_activated = True
             current_sl_price = tp_sl_info.stop_loss_trigger_price
             if position_side == PositionSide.LONG:
-                trailing_activated = current_sl_price >= entry_price
+                new_trailing_activated = current_sl_price >= entry_price
             else:  # SHORT
-                trailing_activated = current_sl_price <= entry_price
+                new_trailing_activated = current_sl_price <= entry_price
+
+            # 既存のポジションが既にtrailing_activated=Trueの場合は維持する
+            # （浮動小数点の精度差でFalseに戻ることを防ぐ）
+            existing_position = trailing_manager.get_position(symbol=symbol)
+            if existing_position is not None and existing_position.trailing_activated:
+                trailing_activated = True
+            else:
+                trailing_activated = new_trailing_activated
 
             # TrailingManagerのポジションを更新
             trailing_manager.add_or_update_position(
