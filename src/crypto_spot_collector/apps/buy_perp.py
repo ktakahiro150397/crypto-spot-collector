@@ -432,9 +432,9 @@ async def trailing_stop_loop() -> None:
                     continue
 
                 pnl_percent = pos.get('percentage', 0)
-                if pnl < 0:
+                unrealized_pnl = pos.get('unrealizedPnl', 0)
+                if unrealized_pnl < 0:
                     pnl_percent *= -1
-                entry_price = float(pos.get('entryPrice', 0))
 
                 # TrailingManagerにポジションが登録されているか確認
                 trailing_position = trailing_manager.get_position(
