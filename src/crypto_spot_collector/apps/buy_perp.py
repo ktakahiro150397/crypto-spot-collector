@@ -144,6 +144,10 @@ sar_checker = SARChecker(
 # Key: symbol (e.g., "XRP/USDC:USDC"), Value: SAR direction ("long", "short", or None)
 sar_direction_tracker: dict[str, str | None] = {}
 
+# Counter for consecutive opposite SAR signals per symbol
+# Key: symbol, Value: consecutive count of opposite SAR direction
+sar_opposite_counter: dict[str, int] = {}
+
 trailing_manager = TrailingStopManagerHyperLiquid()
 background_tasks: set[asyncio.Task] = set()
 
@@ -835,33 +839,74 @@ async def check_signal(
         logger.warning(f"No data available for {symbol}")
         return
 
-    # Check for SAR direction switch (to close existing positions)
+    # Check for SAR direction and consecutive opposite signals for position closing
     previous_sar_direction = sar_direction_tracker.get(symbol)
-    sar_switched, current_sar_direction = sar_checker.check_sar_direction_switch(
+    _, current_sar_direction = sar_checker.check_sar_direction_switch(
         df, previous_sar_direction
     )
-    logger.warning("SAR Direction Check is always False")
-    sar_switched = False
 
     # Update the tracker with current direction
     sar_direction_tracker[symbol] = current_sar_direction
 
-    if sar_switched:
-        logger.info(
-            f"{symbol}: SAR direction switched - Previous: {previous_sar_direction}, "
-            f"Current: {current_sar_direction}"
-        )
-    else:
-        logger.debug(
-            f"{symbol}: SAR direction - Previous: {previous_sar_direction}, "
-            f"Current: {current_sar_direction}"
+    logger.debug(
+        f"{symbol}: SAR direction - Previous: {previous_sar_direction}, "
+        f"Current: {current_sar_direction}"
+    )
+
+    # Check if we need to close position based on consecutive opposite SAR signals
+    sar_close_consecutive_count = secrets["settings"]["perpetual"].get(
+        "sar_close_consecutive_count", 2
+    )
+
+    # Get current position for this symbol
+    positions = await hyperliquid_exchange.exchange_public.fetch_positions()
+    current_position = None
+    current_position_side = None
+    for pos in positions:
+        if pos.get('symbol') == symbol:
+            contracts = pos.get('contracts', 0)
+            if contracts and float(contracts) != 0:
+                current_position = pos
+                current_position_side = pos.get('side')  # 'long' or 'short'
+                break
+
+    # Update opposite SAR counter based on position direction
+    should_close_position = False
+    if current_position is not None and current_sar_direction is not None:
+        # Determine if SAR is opposite to position
+        is_opposite_sar = (
+            (current_position_side == 'long' and current_sar_direction == 'short') or
+            (current_position_side == 'short' and current_sar_direction == 'long')
         )
 
-    # If SAR direction switched, close all positions
-    if sar_switched:
+        if is_opposite_sar:
+            # Increment counter
+            sar_opposite_counter[symbol] = sar_opposite_counter.get(
+                symbol, 0) + 1
+            logger.info(
+                f"{symbol}: Opposite SAR detected (position: {current_position_side}, "
+                f"SAR: {current_sar_direction}). Counter: {sar_opposite_counter[symbol]}/{sar_close_consecutive_count}"
+            )
+
+            # Check if threshold reached
+            if sar_opposite_counter[symbol] >= sar_close_consecutive_count:
+                should_close_position = True
+        else:
+            # Reset counter if SAR is same direction as position
+            if sar_opposite_counter.get(symbol, 0) > 0:
+                logger.debug(
+                    f"{symbol}: SAR aligned with position, resetting counter")
+            sar_opposite_counter[symbol] = 0
+    else:
+        # No position, reset counter
+        sar_opposite_counter[symbol] = 0
+
+    # Close position if consecutive opposite SAR threshold reached
+    if should_close_position:
         logger.info(
-            f"{symbol}: SAR direction switched from {previous_sar_direction} "
-            f"to {current_sar_direction}. Closing all positions."
+            f"{symbol}: Consecutive opposite SAR threshold reached "
+            f"({sar_opposite_counter[symbol]}/{sar_close_consecutive_count}). "
+            f"Closing {current_position_side} position."
         )
         closed_positions = await hyperliquid_exchange.close_all_positions_perp_async(
             side=PositionSide.ALL,
@@ -871,10 +916,11 @@ async def check_signal(
         # Send Discord notification for closed positions
         if closed_positions:
             trailing_manager.remove_position(symbol=symbol)
+            sar_opposite_counter[symbol] = 0  # Reset counter after closing
             await send_close_position_notification(
                 symbol=symbol,
                 closed_positions=closed_positions,
-                reason=f"SAR direction switch: {previous_sar_direction} → {current_sar_direction}",
+                reason=f"Consecutive opposite SAR ({sar_close_consecutive_count}x): position={current_position_side}, SAR={current_sar_direction}",
                 timeframe=timeframe,
             )
 

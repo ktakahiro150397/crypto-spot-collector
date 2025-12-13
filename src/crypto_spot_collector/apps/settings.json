@@ -26,7 +26,8 @@
             "consecutivePositiveCount": 4,
             "price_change_threshold_percent": 999,
             "trailing_stop_interval_minutes": 1,
-            "trailing_stop_activation_pnl_percent": 10.0
+            "trailing_stop_activation_pnl_percent": 10.0,
+            "sar_close_consecutive_count": 2
         },
         "sandbox_mode": false
     }
