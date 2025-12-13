@@ -20,8 +20,8 @@
         "perpetual": {
             "timeframe": "30m",
             "leverage": 20,
-            "take_profit_rate": 1.5,
-            "stop_loss_rate": 0.3,
+            "take_profit_rate": 3.0,
+            "stop_loss_rate": 0.2,
             "amountByUSDC": 150.0,
             "consecutivePositiveCount": 4,
             "price_change_threshold_percent": 999,
