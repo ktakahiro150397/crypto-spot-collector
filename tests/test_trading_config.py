@@ -20,8 +20,8 @@ def valid_config(**overrides: object) -> TradingConfig:
         "timeframe": "30m",
         "amount_usdc": 10.0,
         "leverage": 5,
-        "take_profit_roe": 3.0,
-        "stop_loss_roe": 0.2,
+        "take_profit_roe": 15.0,
+        "stop_loss_roe": 3.0,
         "trailing_interval_minutes": 3,
         "trailing_activation_roe": 7.0,
         "sar_consecutive_count": 4,
@@ -93,6 +93,11 @@ def test_invalid_values_fail_before_runtime(field: str, value: object) -> None:
     config = valid_config(**{field: value})
     with pytest.raises(ValueError):
         config.validate()
+
+
+def test_trailing_must_activate_before_take_profit() -> None:
+    with pytest.raises(ValueError, match="lower than take_profit"):
+        valid_config(take_profit_roe=7.0, trailing_activation_roe=7.0).validate()
 
 
 def test_legacy_mapping_without_sandbox_flag_remains_testnet() -> None:

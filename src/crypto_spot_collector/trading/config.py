@@ -84,6 +84,8 @@ class TradingConfig:
             errors.append("trailing_interval_minutes must be greater than zero")
         if not _positive_number(self.trailing_activation_roe):
             errors.append("trailing_activation_roe must be greater than zero")
+        elif self.trailing_activation_roe >= self.take_profit_roe:
+            errors.append("trailing_activation_roe must be lower than take_profit_roe")
         if self.sar_consecutive_count <= 0:
             errors.append("sar_consecutive_count must be greater than zero")
         if self.sar_close_consecutive_count <= 0:
@@ -188,13 +190,13 @@ class TradingConfig:
             timeframe=str(perpetual.get("timeframe", "30m")),
             amount_usdc=amount_usdc,
             leverage=leverage,
-            take_profit_roe=float(perpetual.get("take_profit_rate", 1.0)),
-            stop_loss_roe=float(perpetual.get("stop_loss_rate", 1.0)),
+            take_profit_roe=float(perpetual.get("take_profit_rate", 15.0)),
+            stop_loss_roe=float(perpetual.get("stop_loss_rate", 3.0)),
             trailing_interval_minutes=int(
                 perpetual.get("trailing_stop_interval_minutes", 15)
             ),
             trailing_activation_roe=float(
-                perpetual.get("trailing_stop_activation_pnl_percent", 10.0)
+                perpetual.get("trailing_stop_activation_pnl_percent", 7.0)
             ),
             sar_consecutive_count=int(perpetual.get("consecutivePositiveCount", 3)),
             sar_close_consecutive_count=int(
