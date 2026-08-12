@@ -34,6 +34,7 @@ from crypto_spot_collector.trading.protection import (
     ProtectionError,
     ProtectionReconciler,
 )
+from crypto_spot_collector.trading.runtime import RuntimeSupervisor
 from crypto_spot_collector.trading.strategy import CandleGate, latest_closed_identity
 from crypto_spot_collector.utils.close_position_notification import (
     close_position_notification_message,
@@ -183,6 +184,18 @@ protection_reconciler = ProtectionReconciler(
     stop_loss_roe=trading_config.stop_loss_roe,
     leverage=trading_config.leverage,
 )
+
+
+async def handle_ws_reconnect() -> None:
+    """Reconcile the missed interval before normal callbacks resume."""
+    await protection_reconciler.reconcile_all(perp_symbols)
+    await notificator.send_notification_async(
+        message="Hyperliquid WebSocket reconnected; exchange snapshot reconciled.",
+        files=[],
+    )
+
+
+hyperliquid_exchange.ws_client.set_reconnect_callback(handle_ws_reconnect)
 
 last_close_position_notification_time = datetime.now(timezone.utc)
 
@@ -699,6 +712,22 @@ async def close_position_notification_loop() -> None:
         logger.error(f"Error in userFills loop: {e}")
     finally:
         logger.error("userFills loop terminated.")
+
+
+async def heartbeat_loop(interval_seconds: float = 900.0) -> None:
+    while True:
+        await asyncio.sleep(interval_seconds)
+        metrics = hyperliquid_exchange.rest.metrics
+        retries = sum(item.retries for item in metrics.values())
+        failures = sum(item.failures for item in metrics.values())
+        await notificator.send_notification_async(
+            message=(
+                f"Hyperliquid bot heartbeat: network={trading_config.network.value}, "
+                f"ws_reconnects={hyperliquid_exchange.ws_client.reconnect_count}, "
+                f"rest_retries={retries}, rest_failures={failures}"
+            ),
+            files=[],
+        )
 
 
 async def signal_check_loop() -> None:
@@ -1469,40 +1498,55 @@ def notification_plot_buff(
 
 async def main() -> None:
     """メインエントリーポイント: 複数の非同期タスクを並行実行"""
-    logger.info("Starting crypto perp collector application")
-
-    # 起動時にTrailingManagerを初期化（既存ポジションを取得）
-    await initialize_trailing_manager()
-
-    # WebSocket接続を確立（サブスクリプションの前に接続が必要）
-    if hyperliquid_exchange.ws_client.ws is None:
-        await hyperliquid_exchange.ws_client.connect()
-        logger.info("WebSocket connected before subscriptions")
-
-    # Start single WebSocket listener for all subscriptions
-    listener_task = asyncio.create_task(
-        hyperliquid_exchange.start_ws_listener())
-    logger.info("Started WebSocket listener (shared by all subscriptions)")
-
-    # Wait a bit for listener to be ready
-    await asyncio.sleep(0.5)
+    logger.info(
+        f"Starting crypto perp collector application on {trading_config.network.value}"
+    )
+    supervisor = RuntimeSupervisor(
+        [hyperliquid_exchange],
+        on_shutdown_requested=order_executor.stop_accepting,
+    )
+    supervisor.install_signal_handlers()
 
     try:
-        # シグナルチェックループとトレーリングストップループを並行実行
-        await asyncio.gather(
-            signal_check_loop(),
-            trailing_stop_loop(),
-            close_position_notification_loop(),
+        # 起動時にTrailingManagerを初期化（既存ポジションを取得）
+        await initialize_trailing_manager()
+
+    # WebSocket接続を確立（サブスクリプションの前に接続が必要）
+        if hyperliquid_exchange.ws_client.ws is None:
+            await hyperliquid_exchange.ws_client.connect()
+            logger.info("WebSocket connected before subscriptions")
+
+        await notificator.send_notification_async(
+            message=(
+                "Hyperliquid bot started: "
+                f"network={trading_config.network.value}, symbols={len(perp_symbols)}"
+            ),
+            files=[],
         )
+
+        await supervisor.run(
+            [
+                hyperliquid_exchange.start_ws_listener(),
+                signal_check_loop(),
+                trailing_stop_loop(),
+                close_position_notification_loop(),
+                heartbeat_loop(),
+            ]
+        )
+    except Exception as exc:
+        logger.exception(f"Fatal runtime error: {type(exc).__name__}")
+        await notificator.send_notification_async(
+            message=f"Hyperliquid bot fatal error: {type(exc).__name__}", files=[]
+        )
+        raise
     finally:
-        # Clean up listener on exit
-        listener_task.cancel()
         try:
-            await listener_task
-        except asyncio.CancelledError:
-            pass
-        await hyperliquid_exchange.close()
-        logger.info("WebSocket listener stopped")
+            await notificator.send_notification_async(
+                message="Hyperliquid bot shutdown complete.", files=[]
+            )
+        finally:
+            await supervisor.close()
+        logger.info("Application shutdown complete")
 
 
 if __name__ == "__main__":

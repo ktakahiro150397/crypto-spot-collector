@@ -124,3 +124,13 @@ def test_invalid_transition_is_rejected(tmp_path: Path) -> None:
     created, _ = store.prepare(intent())
     with pytest.raises(ValueError, match="invalid order transition"):
         store.transition(created.intent_id, OrderStatus.FILLED)
+
+
+@pytest.mark.asyncio
+async def test_shutdown_gate_rejects_new_intents(tmp_path: Path) -> None:
+    executor = IdempotentOrderExecutor(
+        FakeAdapter(), SQLiteOrderIntentStore(tmp_path / "orders.sqlite")
+    )
+    executor.stop_accepting()
+    with pytest.raises(RuntimeError, match="shutdown"):
+        await executor.execute(intent())

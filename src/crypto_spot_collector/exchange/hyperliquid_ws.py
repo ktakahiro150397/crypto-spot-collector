@@ -3,8 +3,12 @@ HyperLiquid WebSocket client for real-time OHLCV data subscription.
 CCXTがHyperliquidのWebSocketをサポートしていないため、自作実装。
 """
 import asyncio
+import hashlib
+import inspect
 import json
-from typing import Any, Callable, Optional
+import random
+from collections import deque
+from typing import Any, Awaitable, Callable, Optional
 
 import websockets
 from loguru import logger
@@ -24,7 +28,13 @@ class HyperLiquidWebSocket:
         "1d", "3d", "1w", "1M"
     ]
 
-    def __init__(self, testnet: bool = False, max_retries: int = 5, retry_delay: float = 5.0):
+    def __init__(
+        self,
+        testnet: bool = False,
+        max_retries: int | None = None,
+        retry_delay: float = 5.0,
+        on_reconnect: Callable[[], Awaitable[None] | None] | None = None,
+    ):
         """
         Initialize HyperLiquid WebSocket client.
 
@@ -37,15 +47,24 @@ class HyperLiquidWebSocket:
         self.ws: Optional[WebSocketClientProtocol] = None
         self._running = False
         self._callbacks: dict[str, Callable] = {}
-        self._subscriptions: list[dict[str, Any]] = []
+        self._subscriptions: dict[str, dict[str, Any]] = {}
         self._max_retries = max_retries
         self._retry_delay = retry_delay
         self._reconnecting = False
+        self._on_reconnect = on_reconnect
+        self._recent_messages: deque[str] = deque(maxlen=2048)
+        self._recent_message_set: set[str] = set()
+        self.reconnect_count = 0
 
         logger.info(
             f"Initialized HyperLiquid WebSocket client "
             f"({'testnet' if testnet else 'mainnet'})"
         )
+
+    def set_reconnect_callback(
+        self, callback: Callable[[], Awaitable[None] | None] | None
+    ) -> None:
+        self._on_reconnect = callback
 
     async def connect(self) -> None:
         """Establish WebSocket connection."""
@@ -86,10 +105,13 @@ class HyperLiquidWebSocket:
         delay = self._retry_delay
 
         try:
-            while retry_count < self._max_retries and self._running:
+            while (
+                self._max_retries is None or retry_count < self._max_retries
+            ) and self._running:
                 retry_count += 1
                 logger.info(
-                    f"Reconnection attempt {retry_count}/{self._max_retries}")
+                    f"Reconnection attempt {retry_count}/"
+                    f"{'unlimited' if self._max_retries is None else self._max_retries}")
 
                 try:
                     # Close existing connection if any
@@ -107,21 +129,27 @@ class HyperLiquidWebSocket:
                     # Restore all subscriptions
                     await self._restore_subscriptions()
 
+                    self.reconnect_count += 1
+                    if self._on_reconnect is not None:
+                        result = self._on_reconnect()
+                        if inspect.isawaitable(result):
+                            await result
+
                     self._reconnecting = False
                     return True
 
                 except Exception as e:
                     logger.warning(
                         f"Reconnection attempt {retry_count} failed: {e}")
-                    if retry_count < self._max_retries:
+                    if self._max_retries is None or retry_count < self._max_retries:
                         logger.info(
                             f"Waiting {delay:.1f}s before next attempt...")
-                        await asyncio.sleep(delay)
+                        await asyncio.sleep(delay + random.uniform(0, delay * 0.2))
                         # Exponential backoff with max 60 seconds
                         delay = min(delay * 2, 60.0)
 
             logger.error(
-                f"Failed to reconnect after {self._max_retries} attempts")
+                f"Failed to reconnect after {retry_count} attempts")
             return False
 
         finally:
@@ -137,13 +165,17 @@ class HyperLiquidWebSocket:
 
         logger.info(f"Restoring {len(self._subscriptions)} subscription(s)...")
 
-        for subscription in self._subscriptions:
+        for subscription in self._subscriptions.values():
             try:
                 if self.ws is not None:
                     await self.ws.send(json.dumps(subscription))
-                    coin = subscription["subscription"]["coin"]
-                    interval = subscription["subscription"]["interval"]
-                    logger.info(f"Restored subscription for {coin} {interval}")
+                    details = subscription["subscription"]
+                    logger.info(
+                        "Restored WebSocket subscription type={} coin={} interval={}",
+                        details.get("type"),
+                        details.get("coin", "user"),
+                        details.get("interval", "n/a"),
+                    )
             except Exception as e:
                 logger.error(
                     f"Failed to restore subscription {subscription}: {e}")
@@ -187,14 +219,14 @@ class HyperLiquidWebSocket:
             }
         }
 
-        # Send subscription message
-        await self.ws.send(json.dumps(subscription))
-        logger.info(f"Subscribed to {coin} candles with {interval} interval")
-
-        # Store subscription and callback
         sub_key = f"candle_{coin}_{interval}"
         self._callbacks[sub_key] = callback
-        self._subscriptions.append(subscription)
+        if sub_key in self._subscriptions:
+            logger.debug(f"Subscription already active for {coin} {interval}")
+            return
+        await self.ws.send(json.dumps(subscription))
+        logger.info(f"Subscribed to {coin} candles with {interval} interval")
+        self._subscriptions[sub_key] = subscription
 
     async def subscribe_trade(self,
                               coin: str,
@@ -211,14 +243,14 @@ class HyperLiquidWebSocket:
             }
         }
 
-        # Send subscription message
-        await self.ws.send(json.dumps(subscription))
-        logger.info(f"Subscribed to {coin} trades")
-
-        # Store subscription and callback
         sub_key = f"trade_{coin}"
         self._callbacks[sub_key] = callback
-        self._subscriptions.append(subscription)
+        if sub_key in self._subscriptions:
+            logger.debug(f"Trade subscription already active for {coin}")
+            return
+        await self.ws.send(json.dumps(subscription))
+        logger.info(f"Subscribed to {coin} trades")
+        self._subscriptions[sub_key] = subscription
 
     async def subscribe_userFills(self,
                                   walletAddress: str,
@@ -235,14 +267,14 @@ class HyperLiquidWebSocket:
             }
         }
 
-        # Send subscription message
-        await self.ws.send(json.dumps(subscription))
-        logger.info(f"Subscribed to userFills for {walletAddress}")
-
-        # Store subscription and callback
         sub_key = f"userFills_{walletAddress}"
         self._callbacks[sub_key] = callback
-        self._subscriptions.append(subscription)
+        if sub_key in self._subscriptions:
+            logger.debug("userFills subscription already active")
+            return
+        await self.ws.send(json.dumps(subscription))
+        logger.info("Subscribed to userFills")
+        self._subscriptions[sub_key] = subscription
 
     async def unsubscribe_candle(self, coin: str, interval: str) -> None:
         """
@@ -273,6 +305,7 @@ class HyperLiquidWebSocket:
         sub_key = f"candle_{coin}_{interval}"
         if sub_key in self._callbacks:
             del self._callbacks[sub_key]
+        self._subscriptions.pop(sub_key, None)
 
     async def listen(self) -> None:
         """
@@ -299,6 +332,21 @@ class HyperLiquidWebSocket:
                         logger.debug(f"Subscription confirmed: {data}")
                         continue
 
+                    # Reconnect snapshots and repeated frames can contain the
+                    # same payload. Keep a bounded content fingerprint set so
+                    # callbacks and trading logic see it only once.
+                    fingerprint = hashlib.sha256(
+                        json.dumps(data, sort_keys=True, separators=(",", ":")).encode()
+                    ).hexdigest()
+                    if fingerprint in self._recent_message_set:
+                        logger.debug("Skipping duplicate WebSocket payload")
+                        continue
+                    if len(self._recent_messages) == self._recent_messages.maxlen:
+                        removed = self._recent_messages.popleft()
+                        self._recent_message_set.discard(removed)
+                    self._recent_messages.append(fingerprint)
+                    self._recent_message_set.add(fingerprint)
+
                     # Handle candle data
                     if data.get("channel") == "candle":
                         candle_data = data.get("data", [])
@@ -315,7 +363,7 @@ class HyperLiquidWebSocket:
                             logger.debug(
                                 f"Looking for callback with key: {sub_key}")
                             if sub_key in self._callbacks:
-                                self._callbacks[sub_key](candle_data)
+                                await self._run_callback(sub_key, candle_data)
                             else:
                                 logger.warning(
                                     f"No callback found for {sub_key}. Available callbacks: {list(self._callbacks.keys())}")
@@ -333,7 +381,7 @@ class HyperLiquidWebSocket:
                             logger.debug(
                                 f"Looking for callback with key: {sub_key}")
                             if sub_key in self._callbacks:
-                                self._callbacks[sub_key](trade_data)
+                                await self._run_callback(sub_key, trade_data)
                             else:
                                 logger.warning(
                                     f"No callback found for {sub_key}. Available callbacks: {list(self._callbacks.keys())}")
@@ -350,7 +398,7 @@ class HyperLiquidWebSocket:
                             logger.debug(
                                 f"Looking for callback with key: {sub_key}")
                             if sub_key in self._callbacks:
-                                self._callbacks[sub_key](user_fills_data)
+                                await self._run_callback(sub_key, user_fills_data)
                             else:
                                 logger.warning(
                                     f"No callback found for {sub_key}. Available callbacks: {list(self._callbacks.keys())}")
@@ -395,6 +443,11 @@ class HyperLiquidWebSocket:
             logger.error(f"Error in listen loop: {e}", exc_info=True)
         finally:
             logger.info("Stopped listening for WebSocket messages")
+
+    async def _run_callback(self, key: str, payload: Any) -> None:
+        result = self._callbacks[key](payload)
+        if inspect.isawaitable(result):
+            await result
 
     async def __aenter__(self) -> "HyperLiquidWebSocket":
         """Async context manager entry."""

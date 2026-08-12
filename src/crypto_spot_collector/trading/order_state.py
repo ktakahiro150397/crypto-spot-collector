@@ -272,8 +272,14 @@ class IdempotentOrderExecutor:
         self.adapter = adapter
         self.store = store
         self._locks: dict[str, asyncio.Lock] = {}
+        self._accepting = True
+
+    def stop_accepting(self) -> None:
+        self._accepting = False
 
     async def execute(self, requested: OrderIntent) -> OrderIntent:
+        if not self._accepting:
+            raise RuntimeError("new order intents are disabled during shutdown")
         lock = self._locks.setdefault(requested.symbol, asyncio.Lock())
         async with lock:
             intent, created = self.store.prepare(requested)

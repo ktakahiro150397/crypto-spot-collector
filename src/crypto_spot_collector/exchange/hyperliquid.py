@@ -18,6 +18,11 @@ from crypto_spot_collector.exchange.types import (
 )
 from crypto_spot_collector.trading.order_state import OrderIntent
 from crypto_spot_collector.trading.protection import ProtectionSpec
+from crypto_spot_collector.trading.resilience import (
+    IDEMPOTENT_WRITE_POLICY,
+    WRITE_POLICY,
+    ResilientCaller,
+)
 
 
 @dataclass
@@ -56,6 +61,7 @@ class HyperLiquidExchange(IExchange):
         self.take_profit_rate = take_profit_rate
         self.stop_loss_rate = stop_loss_rate
         self.leverage = leverage
+        self.rest = ResilientCaller(requests_per_second=10.0)
 
         # WebSocketクライアントの初期化
         self.ws_client = HyperLiquidWebSocket(testnet=testnet)
@@ -100,7 +106,9 @@ class HyperLiquidExchange(IExchange):
 
     async def fetch_balance_async(self) -> Any:
         logger.debug("Fetching account balance asynchronously")
-        balance = await self.exchange_public.fetch_balance()
+        balance = await self.rest.call(
+            "fetch_balance", lambda: self.exchange_public.fetch_balance()
+        )
         logger.debug("Account balance fetched successfully (async)")
         return balance
 
@@ -115,7 +123,9 @@ class HyperLiquidExchange(IExchange):
 
     async def fetch_price_async(self, symbol: str) -> dict[Any, Any]:
         logger.debug(f"Fetching price for {symbol} asynchronously")
-        ticker: dict[Any, Any] = await self.exchange_public.fetch_ticker(symbol)
+        ticker: dict[Any, Any] = await self.rest.call(
+            "fetch_ticker", lambda: self.exchange_public.fetch_ticker(symbol)
+        )
         if 'last' in ticker:
             logger.debug(f"Price for {symbol}: {ticker['last']} (async)")
             return ticker
@@ -150,13 +160,17 @@ class HyperLiquidExchange(IExchange):
                     },
                 }
             )
-        result = await self.exchange_private.create_order(
-            symbol=intent.symbol,
-            type="market",
-            side=intent.side,
-            amount=intent.amount,
-            price=market_price,
-            params=params,
+        result = await self.rest.call(
+            "submit_market_order",
+            lambda: self.exchange_private.create_order(
+                symbol=intent.symbol,
+                type="market",
+                side=intent.side,
+                amount=intent.amount,
+                price=market_price,
+                params=params,
+            ),
+            policy=WRITE_POLICY,
         )
         return dict(result)
 
@@ -164,44 +178,68 @@ class HyperLiquidExchange(IExchange):
         self, symbol: str, cloid: str
     ) -> dict[str, Any] | None:
         try:
-            order = await self.exchange_public.fetch_order(
-                cloid, symbol, {"clientOrderId": cloid}
+            order = await self.rest.call(
+                "fetch_order",
+                lambda: self.exchange_public.fetch_order(
+                    cloid, symbol, {"clientOrderId": cloid}
+                ),
             )
         except ccxt_async.OrderNotFound:
             return None
         return dict(order)
 
     async def fetch_open_orders(self, symbol: str) -> list[dict[str, Any]]:
-        return list(await self.exchange_public.fetch_open_orders(symbol))
+        return list(
+            await self.rest.call(
+                "fetch_open_orders",
+                lambda: self.exchange_public.fetch_open_orders(symbol),
+            )
+        )
 
     async def fetch_fills(self, symbol: str) -> list[dict[str, Any]]:
-        return list(await self.exchange_public.fetch_my_trades(symbol))
+        return list(
+            await self.rest.call(
+                "fetch_fills", lambda: self.exchange_public.fetch_my_trades(symbol)
+            )
+        )
 
     async def fetch_positions(self) -> list[dict[str, Any]]:
-        return list(await self.exchange_public.fetch_positions())
+        return list(
+            await self.rest.call(
+                "fetch_positions", lambda: self.exchange_public.fetch_positions()
+            )
+        )
 
     async def create_protection_order(self, spec: ProtectionSpec) -> dict[str, Any]:
         price_key = (
             "takeProfitPrice" if spec.kind == "take_profit" else "stopLossPrice"
         )
-        result = await self.exchange_private.create_order(
-            symbol=spec.symbol,
-            type="market",
-            side=spec.side,
-            amount=spec.amount,
-            price=spec.trigger_price,
-            params={
-                price_key: spec.trigger_price,
-                "reduceOnly": True,
-                "clientOrderId": spec.cloid,
-            },
+        result = await self.rest.call(
+            "create_protection_order",
+            lambda: self.exchange_private.create_order(
+                symbol=spec.symbol,
+                type="market",
+                side=spec.side,
+                amount=spec.amount,
+                price=spec.trigger_price,
+                params={
+                    price_key: spec.trigger_price,
+                    "reduceOnly": True,
+                    "clientOrderId": spec.cloid,
+                },
+            ),
+            policy=WRITE_POLICY,
         )
         return dict(result)
 
     async def cancel_protection_orders(
         self, symbol: str, order_ids: list[str]
     ) -> None:
-        await self.cancel_orders_async(order_ids=order_ids, symbol=symbol)
+        await self.rest.call(
+            "cancel_protection_orders",
+            lambda: self.cancel_orders_async(order_ids=order_ids, symbol=symbol),
+            policy=IDEMPOTENT_WRITE_POLICY,
+        )
 
     async def fetch_ohlcv_async(
         self,
@@ -212,11 +250,14 @@ class HyperLiquidExchange(IExchange):
     ) -> dict[Any, Any]:
         logger.debug(
             f"Fetching OHLCV data for {symbol} asynchronously from {fromDate} to {toDate} with timeframe {timeframe}")
-        ohlcv: dict[Any, Any] = await self.exchange_public.fetch_ohlcv(
-            symbol,
-            timeframe=timeframe,
-            since=int(fromDate.timestamp() * 1000),
-            limit=None
+        ohlcv: dict[Any, Any] = await self.rest.call(
+            "fetch_ohlcv",
+            lambda: self.exchange_public.fetch_ohlcv(
+                symbol,
+                timeframe=timeframe,
+                since=int(fromDate.timestamp() * 1000),
+                limit=None,
+            ),
         )
         if ohlcv:
             logger.debug(
