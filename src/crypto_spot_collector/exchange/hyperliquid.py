@@ -24,8 +24,14 @@ from crypto_spot_collector.trading.resilience import (
 )
 
 
-class HyperLiquidPerpOnlyTestnet(ccxt_async.hyperliquid):
-    """Work around malformed testnet spot metadata without hiding perp markets."""
+class HyperLiquidPerpOnly(ccxt_async.hyperliquid):
+    """Load only swap markets for the perpetual-only trading adapter.
+
+    Hyperliquid spot metadata can temporarily contain entries that CCXT cannot
+    normalize.  Spot markets are not used by this adapter, so loading them
+    would make an unrelated spot listing capable of stopping both testnet and
+    mainnet perpetual trading.
+    """
 
     async def fetch_markets(
         self, params: dict[str, Any] | None = None
@@ -67,9 +73,7 @@ class HyperLiquidExchange(IExchange):
         self.main_wallet_address = mainWalletAddress
         if privateKey and not privateKey.startswith("0x"):
             privateKey = "0x" + privateKey
-        exchange_type = (
-            HyperLiquidPerpOnlyTestnet if testnet else ccxt_async.hyperliquid
-        )
+        exchange_type = HyperLiquidPerpOnly
         self.exchange_public = exchange_type(
             {
                 "walletAddress": mainWalletAddress,

@@ -4,7 +4,10 @@ from typing import Any
 
 import pytest
 
-from crypto_spot_collector.exchange.hyperliquid import HyperLiquidExchange
+from crypto_spot_collector.exchange.hyperliquid import (
+    HyperLiquidExchange,
+    HyperLiquidPerpOnly,
+)
 
 
 class _DirectCaller:
@@ -24,6 +27,25 @@ class _Exchange:
     async def fetch_balance(self, params: dict[str, str]) -> dict[str, Any]:
         self.requested_balance_type = params["type"]
         return {"free": {"USDC": self.spot_free}}
+
+
+class _PerpOnlyExchange(HyperLiquidPerpOnly):
+    def __init__(self) -> None:
+        self.received_params: dict[str, Any] | None = None
+
+    async def fetch_swap_markets(self, params: dict[str, Any]) -> list[dict[str, Any]]:
+        self.received_params = params
+        return [{"symbol": "ETH/USDC:USDC"}]
+
+
+@pytest.mark.asyncio
+async def test_perp_adapter_skips_spot_market_metadata() -> None:
+    exchange = _PerpOnlyExchange()
+
+    assert await exchange.fetch_markets({"source": "test"}) == [
+        {"symbol": "ETH/USDC:USDC"}
+    ]
+    assert exchange.received_params == {"source": "test"}
 
 
 @pytest.mark.asyncio
