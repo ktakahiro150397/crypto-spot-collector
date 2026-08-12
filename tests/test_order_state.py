@@ -1,4 +1,5 @@
 import asyncio
+import gc
 from pathlib import Path
 from typing import Any, Sequence
 
@@ -117,6 +118,51 @@ async def test_partial_fill_is_persisted(tmp_path: Path) -> None:
     result = await executor.execute(intent())
     assert result.status is OrderStatus.PARTIALLY_FILLED
     assert result.filled == 0.4
+
+
+@pytest.mark.asyncio
+async def test_statusless_market_response_reconciles_fill_by_cloid(tmp_path: Path) -> None:
+    adapter = FakeAdapter()
+    adapter.response = {"id": "88", "status": None, "filled": 0}
+    adapter.fills = [
+        {"amount": 1.0, "info": {"cloid": intent().cloid}}
+    ]
+    executor = IdempotentOrderExecutor(
+        adapter, SQLiteOrderIntentStore(tmp_path / "orders.sqlite")
+    )
+    result = await executor.execute(intent())
+    assert result.status is OrderStatus.FILLED
+    assert result.filled == 1.0
+    assert adapter.submit_count == 1
+
+
+@pytest.mark.asyncio
+async def test_fill_ledger_overrides_stale_open_order_snapshot(tmp_path: Path) -> None:
+    adapter = FakeAdapter()
+    adapter.response = {"id": "88", "status": None, "filled": 0}
+    adapter.order = {
+        "id": "88",
+        "clientOrderId": intent().cloid,
+        "status": "open",
+        "filled": 0,
+    }
+    adapter.fills = [{"amount": 1.0, "info": {"cloid": intent().cloid}}]
+    executor = IdempotentOrderExecutor(
+        adapter, SQLiteOrderIntentStore(tmp_path / "orders.sqlite")
+    )
+    result = await executor.execute(intent())
+    assert result.status is OrderStatus.FILLED
+    assert result.filled == 1.0
+
+
+def test_store_does_not_leave_sqlite_file_locked(tmp_path: Path) -> None:
+    database = tmp_path / "orders.sqlite"
+    store = SQLiteOrderIntentStore(database)
+    store.prepare(intent())
+    store.get(intent().intent_id)
+    gc.collect()
+    database.unlink()
+    assert not database.exists()
 
 
 def test_invalid_transition_is_rejected(tmp_path: Path) -> None:

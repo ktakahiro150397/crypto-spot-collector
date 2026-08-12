@@ -5,11 +5,12 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import sqlite3
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
-from typing import Any, Protocol, Sequence
+from typing import Any, Iterator, Protocol, Sequence
 
 
 class OrderStatus(str, Enum):
@@ -128,8 +129,17 @@ class SQLiteOrderIntentStore:
         connection.row_factory = sqlite3.Row
         return connection
 
+    @contextmanager
+    def _transaction(self) -> Iterator[sqlite3.Connection]:
+        connection = self._connect()
+        try:
+            with connection:
+                yield connection
+        finally:
+            connection.close()
+
     def _initialize(self) -> None:
-        with self._connect() as connection:
+        with self._transaction() as connection:
             connection.execute("PRAGMA journal_mode=WAL")
             connection.execute(
                 """
@@ -153,7 +163,7 @@ class SQLiteOrderIntentStore:
             )
 
     def prepare(self, intent: OrderIntent) -> tuple[OrderIntent, bool]:
-        with self._connect() as connection:
+        with self._transaction() as connection:
             connection.execute("BEGIN IMMEDIATE")
             existing = connection.execute(
                 "SELECT * FROM order_intents WHERE intent_id = ?", (intent.intent_id,)
@@ -188,7 +198,7 @@ class SQLiteOrderIntentStore:
             return intent, True
 
     def get(self, intent_id: str) -> OrderIntent | None:
-        with self._connect() as connection:
+        with self._transaction() as connection:
             row = connection.execute(
                 "SELECT * FROM order_intents WHERE intent_id = ?", (intent_id,)
             ).fetchone()
@@ -203,7 +213,7 @@ class SQLiteOrderIntentStore:
         order_id: str | None = None,
         error: str | None = None,
     ) -> OrderIntent:
-        with self._connect() as connection:
+        with self._transaction() as connection:
             connection.execute("BEGIN IMMEDIATE")
             row = connection.execute(
                 "SELECT * FROM order_intents WHERE intent_id = ?", (intent_id,)
@@ -306,15 +316,20 @@ class IdempotentOrderExecutor:
                     OrderStatus.REJECTED,
                     error=f"{type(exc).__name__}: {exc}",
                 )
-            return self._apply_exchange_order(intent, response)
+            applied = self._apply_exchange_order(intent, response)
+            # HyperLiquid can return an accepted market-order envelope with no
+            # normalized CCXT status even though the order has already filled.
+            # Reconcile that ambiguous response by cloid before returning; the
+            # UNKNOWN state continues to inhibit any automatic resubmission.
+            if applied.status is OrderStatus.UNKNOWN:
+                return await self.reconcile(applied)
+            return applied
 
     async def reconcile(self, intent: OrderIntent) -> OrderIntent:
         order = await self.adapter.fetch_order_by_cloid(intent.symbol, intent.cloid)
         if order is None:
             orders = await self.adapter.fetch_open_orders(intent.symbol)
             order = next((item for item in orders if _cloid(item) == intent.cloid), None)
-        if order is not None:
-            return self._apply_exchange_order(intent, order)
 
         fills = await self.adapter.fetch_fills(intent.symbol)
         matching = [fill for fill in fills if _cloid(fill) == intent.cloid]
@@ -326,6 +341,12 @@ class IdempotentOrderExecutor:
                 else OrderStatus.PARTIALLY_FILLED
             )
             return self.store.transition(intent.intent_id, status, filled=filled)
+
+        # HyperLiquid's lookup-by-cloid endpoint can represent an already
+        # filled market order as open. Prefer the immutable fill ledger above
+        # the order snapshot; only use the latter when no linked fill exists.
+        if order is not None:
+            return self._apply_exchange_order(intent, order)
 
         # Positions are still queried as part of the timeout reconciliation.
         # Without a cloid/order/fill link a position is not sufficient proof

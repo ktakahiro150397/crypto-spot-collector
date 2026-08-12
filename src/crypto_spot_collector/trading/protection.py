@@ -18,6 +18,7 @@ class PositionSnapshot:
     side: str
     contracts: float
     entry_price: float
+    leverage: float | None = None
 
 
 @dataclass(frozen=True)
@@ -45,6 +46,8 @@ class ProtectionAdapter(Protocol):
     async def fetch_open_orders(self, symbol: str) -> Sequence[dict[str, Any]]: ...
 
     async def fetch_fills(self, symbol: str) -> Sequence[dict[str, Any]]: ...
+
+    async def fetch_last_price(self, symbol: str) -> float: ...
 
     async def create_protection_order(self, spec: ProtectionSpec) -> dict[str, Any]: ...
 
@@ -114,6 +117,20 @@ class ProtectionReconciler:
             )
 
         desired = self._desired(position, protection_orders, trailing_stop)
+        last_price = float(await self.adapter.fetch_last_price(symbol))
+        if last_price <= 0:
+            raise ProtectionError(f"invalid last price returned for {symbol}")
+        stop_spec = next(spec for spec in desired if spec.kind == "stop_loss")
+        stop_is_breached = (
+            position.side == "long" and last_price <= stop_spec.trigger_price
+        ) or (
+            position.side == "short" and last_price >= stop_spec.trigger_price
+        )
+        if stop_is_breached:
+            raise ProtectionError(
+                f"configured stop for {symbol} is already breached; "
+                "a reduce-only close is required"
+            )
         retained: dict[str, dict[str, Any]] = {}
         created: list[str] = []
         for spec in desired:
@@ -178,11 +195,12 @@ class ProtectionReconciler:
         if position.side not in {"long", "short"}:
             raise ProtectionError(f"unsupported position side: {position.side}")
         direction = 1 if is_long else -1
+        leverage = position.leverage or float(self.leverage)
         take_profit = position.entry_price * (
-            1 + direction * self.take_profit_roe / self.leverage
+            1 + direction * self.take_profit_roe / leverage
         )
         stop_loss = position.entry_price * (
-            1 - direction * self.stop_loss_roe / self.leverage
+            1 - direction * self.stop_loss_roe / leverage
         )
         current_stops = [
             _trigger(order) for order in current_orders if _kind(order) == "stop_loss"
@@ -211,6 +229,7 @@ def _position(raw: dict[str, Any]) -> PositionSnapshot:
         side=str(raw.get("side", "")).lower(),
         contracts=contracts,
         entry_price=entry,
+        leverage=(float(raw["leverage"]) if raw.get("leverage") is not None else None),
     )
 
 
@@ -257,6 +276,9 @@ def _matches(order: dict[str, Any], spec: ProtectionSpec) -> bool:
     return (
         _kind(order) == spec.kind
         and math.isclose(amount, spec.amount, rel_tol=1e-8, abs_tol=1e-10)
-        and math.isclose(_trigger(order), spec.trigger_price, rel_tol=1e-8, abs_tol=1e-10)
+        # HyperLiquid rounds trigger prices to the market's significant-digit
+        # precision. Accept that exchange-normalized value when verifying the
+        # pair, while still rejecting a materially different protection level.
+        and math.isclose(_trigger(order), spec.trigger_price, rel_tol=5e-5, abs_tol=1e-10)
         and bool(order.get("reduceOnly", order.get("info", {}).get("reduceOnly", True)))
     )

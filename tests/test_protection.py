@@ -17,6 +17,7 @@ class FakeProtectionAdapter:
         self.created: list[ProtectionSpec] = []
         self.cancelled: list[str] = []
         self.fail_kind: str | None = None
+        self.last_price = 100.0
 
     async def fetch_positions(self) -> Sequence[dict[str, Any]]:
         return self.positions
@@ -26,6 +27,9 @@ class FakeProtectionAdapter:
 
     async def fetch_fills(self, symbol: str) -> Sequence[dict[str, Any]]:
         return []
+
+    async def fetch_last_price(self, symbol: str) -> float:
+        return self.last_price
 
     async def create_protection_order(self, spec: ProtectionSpec) -> dict[str, Any]:
         if spec.kind == self.fail_kind:
@@ -145,6 +149,7 @@ async def test_orphan_protection_is_cancelled_when_flat() -> None:
 async def test_recovered_trailing_stop_never_moves_backward() -> None:
     adapter = FakeProtectionAdapter()
     adapter.positions = [position()]
+    adapter.last_price = 106
     adapter.orders = [
         {
             "id": "trailing-sl",
@@ -161,3 +166,49 @@ async def test_recovered_trailing_stop_never_moves_backward() -> None:
         if order.get("info", {}).get("orderType") == "Stop Market"
     )
     assert stop["triggerPrice"] == 105
+
+
+@pytest.mark.asyncio
+async def test_actual_position_leverage_drives_protection_prices() -> None:
+    adapter = FakeProtectionAdapter()
+    actual = position()
+    actual["leverage"] = 10
+    adapter.positions = [actual]
+    await reconciler(adapter).reconcile_symbol("BTC/USDC:USDC")
+    take_profit = next(spec for spec in adapter.created if spec.kind == "take_profit")
+    assert take_profit.trigger_price == 130
+
+
+@pytest.mark.asyncio
+async def test_exchange_price_rounding_is_accepted_during_verification() -> None:
+    adapter = FakeProtectionAdapter()
+    adapter.positions = [position()]
+    adapter.orders = [
+        {
+            "id": "rounded-tp",
+            "amount": 2,
+            "triggerPrice": 115.0004,
+            "reduceOnly": True,
+            "info": {"orderType": "Take Profit Market"},
+        },
+        {
+            "id": "rounded-sl",
+            "amount": 2,
+            "triggerPrice": 99.0004,
+            "reduceOnly": True,
+            "info": {"orderType": "Stop Market"},
+        },
+    ]
+    await reconciler(adapter).reconcile_symbol("BTC/USDC:USDC")
+    assert adapter.created == []
+
+
+@pytest.mark.asyncio
+async def test_breached_stop_requires_reduce_only_close_without_new_orders() -> None:
+    adapter = FakeProtectionAdapter()
+    adapter.positions = [position()]
+    adapter.last_price = 98.0
+    with pytest.raises(ProtectionError, match="already breached"):
+        await reconciler(adapter).reconcile_symbol("BTC/USDC:USDC")
+    assert adapter.created == []
+    assert adapter.cancelled == []

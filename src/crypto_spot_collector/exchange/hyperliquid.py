@@ -25,6 +25,15 @@ from crypto_spot_collector.trading.resilience import (
 )
 
 
+class HyperLiquidPerpOnlyTestnet(ccxt_async.hyperliquid):
+    """Work around malformed testnet spot metadata without hiding perp markets."""
+
+    async def fetch_markets(
+        self, params: dict[str, Any] | None = None
+    ) -> list[dict[str, Any]]:
+        return list(await self.fetch_swap_markets(params or {}))
+
+
 @dataclass
 class HyperliquidTakeProfitStopLossPositionInfo:
     symbol: str
@@ -44,11 +53,14 @@ class HyperLiquidExchange(IExchange):
                  leverage: int,
                  testnet: bool = False,) -> None:
         logger.info("Initializing HyperLiquid exchange client")
-        self.exchange_public = ccxt_async.hyperliquid({
+        if privateKey and not privateKey.startswith("0x"):
+            privateKey = "0x" + privateKey
+        exchange_type = HyperLiquidPerpOnlyTestnet if testnet else ccxt_async.hyperliquid
+        self.exchange_public = exchange_type({
             "walletAddress": mainWalletAddress,
         })
 
-        self.exchange_private = ccxt_async.hyperliquid({
+        self.exchange_private = exchange_type({
             "walletAddress": apiWalletAddress,
             "privateKey": privateKey,
         })
@@ -128,11 +140,16 @@ class HyperLiquidExchange(IExchange):
         )
         if 'last' in ticker:
             logger.debug(f"Price for {symbol}: {ticker['last']} (async)")
-            return ticker
         else:
             logger.error(f"Price not found for symbol {symbol}")
             raise Exception(
                 f"symbol = {symbol} | Price not found in ticker data")
+        return ticker
+
+    async def fetch_last_price(self, symbol: str) -> float:
+        """Return the latest traded price for protection safety checks."""
+        ticker = await self.fetch_price_async(symbol)
+        return float(ticker.get("last") or ticker.get("close") or 0)
 
     async def submit_market_order(self, intent: OrderIntent) -> dict[str, Any]:
         """Submit an intent using its deterministic Hyperliquid cloid."""
