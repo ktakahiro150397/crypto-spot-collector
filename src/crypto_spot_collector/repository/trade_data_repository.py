@@ -32,7 +32,7 @@ class TradeDataRepository:
         self,
         exc_type: Optional[Type[BaseException]],
         exc_val: Optional[BaseException],
-        exc_tb: Optional[object]
+        exc_tb: Optional[object],
     ) -> None:
         """Context manager exit."""
         if self._own_session and self.session:
@@ -50,7 +50,7 @@ class TradeDataRepository:
         price: float,
         quantity: float,
         fee: float,
-        timestamp_utc: datetime
+        timestamp_utc: datetime,
     ) -> None:
         """Create or update trade data record.
 
@@ -75,7 +75,8 @@ class TradeDataRepository:
         )
         if not crypto:
             crypto = Cryptocurrency(
-                name=cryptocurrency_name, symbol=cryptocurrency_name)
+                name=cryptocurrency_name, symbol=cryptocurrency_name
+            )
             self.session.add(crypto)
             self.session.commit()
 
@@ -99,7 +100,7 @@ class TradeDataRepository:
             position_type = "SHORT"
 
         if status is None:
-            status = 'OPEN'
+            status = "OPEN"
         else:
             status = status.upper()
 
@@ -133,9 +134,7 @@ class TradeDataRepository:
         self.session.commit()
 
     def update_trade_status_by_trade_id(
-        self,
-        trade_id: str,
-        new_status: Literal["OPEN", "CANCELED", "CLOSED"]
+        self, trade_id: str, new_status: Literal["OPEN", "CANCELED", "CLOSED"]
     ) -> None:
         """Update the status of a trade data record by trade ID.
 
@@ -150,16 +149,12 @@ class TradeDataRepository:
         )
 
         if not trade_data:
-            raise ValueError(
-                f"Trade data with trade_id '{trade_id}' not found")
+            raise ValueError(f"Trade data with trade_id '{trade_id}' not found")
 
         trade_data.status = new_status
         self.session.commit()
 
-    def get_current_position_and_avg_price(
-        self,
-        symbol: str
-    ) -> tuple[float, float]:
+    def get_current_position_and_avg_price(self, symbol: str) -> tuple[float, float]:
         """Get current holdings and average acquisition price for a given cryptocurrency symbol.
 
         Args:
@@ -192,17 +187,16 @@ class TradeDataRepository:
         if not trades:
             return 0.0, 0.0
 
-        total_quantity = Decimal('0.0')  # Current holdings
-        total_cost = Decimal('0.0')      # Total cost basis
+        total_quantity = Decimal("0.0")  # Current holdings
+        total_cost = Decimal("0.0")  # Total cost basis
 
         for trade in trades:
             if trade.position_type == "LONG":  # Purchase
                 # Add to holdings and update total cost
                 # Use Decimal for precise calculations
-                purchase_cost = trade.price * trade.quantity
+                purchase_cost = trade.price * trade.quantity + trade.fee
                 total_cost += purchase_cost
-                total_quantity += trade.quantity - \
-                    (trade.fee / trade.price)  # Adjust quantity for fee
+                total_quantity += trade.quantity
 
             elif trade.position_type == "SHORT":  # Sale
                 # Reduce holdings (average price remains the same)
@@ -211,12 +205,11 @@ class TradeDataRepository:
                     # Calculate current average price
                     current_avg_price = total_cost / total_quantity
                     # Reduce cost basis proportionally
-                    total_cost -= current_avg_price * \
-                        sell_quantity - (trade.fee)
+                    total_cost -= current_avg_price * sell_quantity
 
                 total_quantity -= sell_quantity
                 # Prevent negative holdings
-                total_quantity = max(Decimal('0.0'), total_quantity)
+                total_quantity = max(Decimal("0.0"), total_quantity)
 
         # Calculate final average price
         if total_quantity > 0:
@@ -229,10 +222,7 @@ class TradeDataRepository:
         else:
             return 0.0, 0.0
 
-    def get_average_buy_price_by_symbol(
-        self,
-        symbol: str
-    ) -> float:
+    def get_average_buy_price_by_symbol(self, symbol: str) -> float:
         """Get average acquisition price for a given cryptocurrency symbol.
 
         This method is deprecated. Use get_current_position_and_avg_price() instead.
@@ -245,7 +235,9 @@ class TradeDataRepository:
         _, avg_price = self.get_current_position_and_avg_price(symbol)
         return avg_price
 
-    def get_closed_long_positions_date(self, symbol: str, start_date: datetime, end_date: datetime) -> list[TradeData]:
+    def get_closed_long_positions_date(
+        self, symbol: str, start_date: datetime, end_date: datetime
+    ) -> list[TradeData]:
         """Get closed long positions for a given cryptocurrency symbol within a date range.
 
         Args:
@@ -281,7 +273,9 @@ class TradeDataRepository:
 
         return trades
 
-    def get_closed_short_positions_date(self, symbol: str, start_date: datetime, end_date: datetime) -> list[TradeData]:
+    def get_closed_short_positions_date(
+        self, symbol: str, start_date: datetime, end_date: datetime
+    ) -> list[TradeData]:
         """Get closed short positions for a given cryptocurrency symbol within a date range.
 
         Args:

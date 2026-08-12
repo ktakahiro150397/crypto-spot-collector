@@ -78,7 +78,10 @@ testpaths = ["tests"]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
-addopts = "-v --tb=short --strict-markers"
+addopts = "-v --tb=short --strict-markers -p no:cacheprovider"
+markers = [
+    "external: requires explicitly authorized external network access",
+]
 
 [tool.coverage.run]
 source = ["src"]

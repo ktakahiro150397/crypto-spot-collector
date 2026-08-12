@@ -11,20 +11,28 @@ from crypto_spot_collector.checkers.base_checker import SignalChecker
 class SARChecker(SignalChecker):
     """Checker for Parabolic SAR buy and sell signals."""
 
-    def __init__(self, consecutive_count: int = 3) -> None:
+    def __init__(
+        self,
+        consecutive_count: int = 3,
+        *,
+        consecutive_positive_count: int | None = None,
+    ) -> None:
         """
         Initialize SAR checker.
 
         Args:
             consecutive_count: Number of consecutive SAR values required for signal
         """
+        # Preserve the public keyword used by the original tests and scripts
+        # while keeping the direction-neutral name used by the perp runtime.
+        if consecutive_positive_count is not None:
+            consecutive_count = consecutive_positive_count
+        if consecutive_count <= 0:
+            raise ValueError("consecutive_count must be greater than zero")
         self.consecutive_count = consecutive_count
 
     def _check_consecutive_values(
-        self,
-        values: Any,
-        column_name: str,
-        signal_type: str
+        self, values: Any, column_name: str, signal_type: str
     ) -> bool:
         """
         共通処理: NaNから数値に切り替わって、指定数連続で値が存在するかチェック。
@@ -38,35 +46,21 @@ class SARChecker(SignalChecker):
             True if signal is detected, False otherwise
         """
         consecutive = 0
-
-        # 最初に連続する数値の個数を数える
-        for value in values:
+        for index, value in enumerate(values):
             if pd.isna(value):
-                break
+                if consecutive == self.consecutive_count:
+                    logger.debug(
+                        f"SAR {signal_type} signal confirmed: "
+                        f"{self.consecutive_count} completed consecutive values"
+                    )
+                    return True
+                consecutive = 0
+                continue
             consecutive += 1
 
         logger.debug(
-            f"Consecutive {signal_type} SAR values ({column_name}): {consecutive}")
-
-        # 連続する数値が指定数以外の場合はFalse
-        if consecutive != self.consecutive_count:
-            logger.debug(
-                f"Signal check failed: consecutive={consecutive} "
-                f"(expected: {self.consecutive_count})"
-            )
-            return False
-
-        # 指定数の数値の後にNaNがあるかチェック
-        if consecutive < len(values) and pd.isna(values[consecutive]):
-            logger.debug(
-                f"SAR {signal_type} signal confirmed: {self.consecutive_count} "
-                f"consecutive values after NaN"
-            )
-            return True
-
-        logger.debug(
-            f"Signal check failed: no NaN after {self.consecutive_count} "
-            f"consecutive values"
+            f"Signal check failed: no completed run of "
+            f"{self.consecutive_count} {column_name} values"
         )
         return False
 
@@ -90,20 +84,18 @@ class SARChecker(SignalChecker):
 
         # より多くのデータを確認（最大100件）
         check_count = min(100, len(df))
-        recent_values = df["sar_up"].tail(check_count).values[::-1]
+        recent_values = df["sar_up"].tail(check_count).values
 
         # デバッグ用: df最新・最古の10件を表示
-        logger.debug(
-            f"DataFrame head (oldest 10 rows):\n{df.head(10)}")
-        logger.debug(
-            f"DataFrame tail (newest 10 rows):\n{df.tail(10)}")
+        logger.debug(f"DataFrame head (oldest 10 rows):\n{df.head(10)}")
+        logger.debug(f"DataFrame tail (newest 10 rows):\n{df.tail(10)}")
         # デバッグ用: tail(10) の sar_up 値を直接表示
         tail_sar_up = df["sar_up"].tail(10).values
-        logger.debug(
-            f"df['sar_up'].tail(10).values (oldest -> newest): {tail_sar_up}")
+        logger.debug(f"df['sar_up'].tail(10).values (oldest -> newest): {tail_sar_up}")
         # デバッグ用: 最新10件の値を表示
         logger.debug(
-            f"Latest 10 sar_up values (newest -> oldest): {recent_values[:10]}")
+            f"Latest 10 sar_up values (newest -> oldest): {recent_values[:10]}"
+        )
         logger.debug(f"Total data points checked: {check_count}")
 
         return self._check_consecutive_values(recent_values, "sar_up", "long")
@@ -128,11 +120,12 @@ class SARChecker(SignalChecker):
 
         # より多くのデータを確認（最大100件）
         check_count = min(100, len(df))
-        recent_values = df["sar_down"].tail(check_count).values[::-1]
+        recent_values = df["sar_down"].tail(check_count).values
 
         # デバッグ用: 最新10件の値を表示
         logger.debug(
-            f"Latest 10 sar_down values (newest -> oldest): {recent_values[:10]}")
+            f"Latest 10 sar_down values (newest -> oldest): {recent_values[:10]}"
+        )
         logger.debug(f"Total data points checked: {check_count}")
 
         return self._check_consecutive_values(recent_values, "sar_down", "short")
@@ -163,13 +156,11 @@ class SARChecker(SignalChecker):
             None if SAR direction cannot be determined
         """
         if df.empty:
-            logger.warning(
-                "DataFrame is empty, cannot determine SAR direction")
+            logger.warning("DataFrame is empty, cannot determine SAR direction")
             return None
 
         if "sar_up" not in df.columns or "sar_down" not in df.columns:
-            logger.error(
-                "DataFrame does not contain 'sar_up' or 'sar_down' columns")
+            logger.error("DataFrame does not contain 'sar_up' or 'sar_down' columns")
             return None
 
         # Check the most recent SAR value
@@ -187,9 +178,7 @@ class SARChecker(SignalChecker):
             return None
 
     def check_sar_direction_switch(
-        self,
-        df: pd.DataFrame,
-        previous_direction: str | None
+        self, df: pd.DataFrame, previous_direction: str | None
     ) -> tuple[bool, str | None]:
         """
         Check if SAR direction has switched from the previous direction.
