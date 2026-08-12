@@ -72,7 +72,7 @@ flowchart LR
 
 ## 4. 対象銘柄と現在の非機密設定
 
-対象は以下の 11 銘柄で、CCXT のリニア無期限先物表現 `BASE/USDC:USDC` を使う (`buy_perp.py:103-116`)。
+対象はコード固定ではなく、検証済みの `perpetual.symbols` allowlistで指定する。現在のtestnet設定は以下の11銘柄で、CCXTのリニア無期限先物表現 `BASE/USDC:USDC` を使う。
 
 `BTC`, `ETH`, `XRP`, `SOL`, `HYPE`, `ZEC`, `FARTCOIN`, `LINK`, `AVAX`, `ADA`, `LTC`
 
@@ -81,7 +81,7 @@ flowchart LR
 | キー | 現在値 | 現行コードでの用途 |
 | --- | ---: | --- |
 | `perpetual.timeframe` | `30m` | OHLCV とシグナル評価間隔 |
-| `perpetual.leverage` | `20` | TP/SL 価格計算に使用。ただし取引所へレバレッジ設定を送っていない |
+| `perpetual.leverage` | `20` | entry前にcross leverageとして設定し、実positionでも照合 |
 | `perpetual.take_profit_rate` | `3.0` | TP トリガー計算の分子 |
 | `perpetual.stop_loss_rate` | `0.2` | SL トリガー計算の分子 |
 | `perpetual.amountByUSDC` | `200` | `数量 = 200 / 直近価格` |
@@ -90,25 +90,30 @@ flowchart LR
 | `perpetual.trailing_stop_interval_minutes` | `3` | トレーリング監視間隔 |
 | `perpetual.trailing_stop_activation_pnl_percent` | `7` | トレーリング開始判定に使うポジション `percentage` |
 | `perpetual.sar_close_consecutive_count` | `2` | 反対向き SAR による決済までの評価回数 |
-| `settings.sandbox_mode` | `false` | `false` は mainnet。安全側の既定値ではない |
+| `perpetual.risk.max_order_notional_usdc` | `200` | 1注文の上限 |
+| `perpetual.risk.max_symbol_notional_usdc` | `200` | 1銘柄の上限 |
+| `perpetual.risk.max_total_notional_usdc` | `400` | 全positionと予約の合計上限 |
+| `perpetual.risk.max_positions` | `2` | 同時position上限 |
+| `perpetual.risk.min_free_collateral_usdc` | `25` | 発注後も残すfree collateral |
+| `settings.network` | `testnet` | mainnetは三重interlockと明示risk設定が必須 |
 
 ### 4.1 設定スキーマ上の注意
 
-- `settings.json` の `settings.timeframes` は別アプリ向けで、`buy_perp.py` は `settings.perpetual` と `settings.sandbox_mode` を参照する。
-- `settings.json.sample` は現行ファイルと項目・値が同期していない。少なくとも `timeframe`、`consecutivePositiveCount`、`price_change_threshold_percent`、`sandbox_mode` が不足し、TP/SL、注文額、トレーリング値も異なる。
+- `settings.json` の `settings.timeframes` は別アプリ向けで、`buy_perp.py` は起動時に `settings.perpetual` を `TradingConfig` へ変換した後、raw設定を再読込しない。
+- `settings.json.sample` はproduction schemaと同期し、symbols、strategy、scheduler、trailing、risk、network interlockをすべて明示する。
 - `secrets.json.sample` が示す Hyperliquid の必須フィールド名は `hyperliquid.mainWalletAddress`、`hyperliquid.apiWalletAddress`、`hyperliquid.privatekey`。Discord は `discord.discordWebhookUrl` と `discord.discordBotToken`、Bybit は `bybit.apiKey` と `bybit.secret` を持つ。ここに示したのはスキーマ上の名前だけで、値は記載しない。
 - `buy_perp.py` は Discord の perpetual 専用フィールド `discord.discordWebhookUrlPerpetual` を要求するが、`secrets.json.sample` にそのフィールドがない。サンプルから安全に起動できる契約になっていない。
-- `load_config` は設定を浅く結合する。スキーマ検証、型・範囲検証、mainnet の明示承認検証はない。
+- `TradingConfig` は型・範囲・risk上限の整合、mainnetの明示承認、canaryの1 symbol/1 position制約をclient生成前に検証する。
 
 ## 5. 起動から終了までの現行挙動
 
 ### 5.1 起動
 
 1. モジュール import 時に設定を読み、Discord、DB セッション、REST/WS クライアント、SAR 判定器、インメモリ状態を生成する (`buy_perp.py:118-152`)。
-2. 取引所の全ポジションを取得し、対象 11 銘柄だけを走査する (`buy_perp.py:157-240`)。
+2. 未確定の永続注文intentを復元後、取引所の全ポジションを取得し、allowlist銘柄を走査する。
 3. ポジションに TP と SL が両方ある場合だけトレーリング管理へ登録する。ロングで `SL >= entry`、ショートで `SL <= entry` ならトレーリング済みと推定する。
-4. 起動時同期の例外はログだけで握りつぶし、そのまま bot を起動する。保護注文を確認できない状態でも取引が継続し得る。
-5. WebSocket に接続し、共有 listener、シグナルループ、トレーリングループ、userFills 通知ループを `asyncio.gather` で並行実行する (`buy_perp.py:1422-1448`)。
+4. 起動時同期または保護検証の例外はfatalとして戦略workerを開始しない。
+5. WebSocket に接続し、supervisor配下で共有listener、シグナル、トレーリング、userFills通知、heartbeatを実行する。
 
 判定: 起動経路は**実装済み**だが、fail-closed ではないため安定運用としては**不完全**。
 

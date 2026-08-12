@@ -1,3 +1,6 @@
+import math
+from datetime import datetime, timezone
+
 import pytest
 
 from crypto_spot_collector.trading.config import (
@@ -5,6 +8,7 @@ from crypto_spot_collector.trading.config import (
     Network,
     SignalMode,
     TradingConfig,
+    next_timeframe_boundary,
 )
 
 SYMBOLS = ("BTC/USDC:USDC",)
@@ -23,6 +27,12 @@ def valid_config(**overrides: object) -> TradingConfig:
         "sar_consecutive_count": 4,
         "sar_close_consecutive_count": 2,
         "price_change_threshold_percent": 999.0,
+        "max_order_notional_usdc": 25.0,
+        "max_symbol_notional_usdc": 50.0,
+        "max_total_notional_usdc": 100.0,
+        "max_positions": 2,
+        "max_leverage": 5,
+        "min_free_collateral_usdc": 10.0,
     }
     values.update(overrides)
     return TradingConfig(**values)  # type: ignore[arg-type]
@@ -72,6 +82,11 @@ def test_explicit_mainnet_configuration_is_accepted() -> None:
         ("stop_loss_roe", -1),
         ("trailing_interval_minutes", 0),
         ("trailing_activation_roe", 0),
+        ("max_order_notional_usdc", math.nan),
+        ("max_symbol_notional_usdc", math.inf),
+        ("max_total_notional_usdc", -math.inf),
+        ("min_free_collateral_usdc", math.nan),
+        ("entry_kill_switch_file", ""),
     ],
 )
 def test_invalid_values_fail_before_runtime(field: str, value: object) -> None:
@@ -106,3 +121,93 @@ def test_margin_mode_is_explicit_and_validated() -> None:
 
     with pytest.raises(ValueError, match="margin_mode"):
         valid_config(margin_mode="portfolio").validate()
+
+
+def test_symbols_are_loaded_from_validated_mapping() -> None:
+    config = TradingConfig.from_mapping({"perpetual": {"symbols": list(SYMBOLS)}})
+    assert config.symbols == SYMBOLS
+
+
+def test_canary_requires_one_symbol_and_one_position() -> None:
+    valid_config(canary_mode=True, max_positions=1).validate()
+
+    with pytest.raises(ValueError, match="exactly one symbol"):
+        valid_config(
+            symbols=("BTC/USDC:USDC", "ETH/USDC:USDC"),
+            canary_mode=True,
+            max_positions=1,
+        ).validate()
+    with pytest.raises(ValueError, match="max_positions=1"):
+        valid_config(canary_mode=True, max_positions=2).validate()
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"max_order_notional_usdc": 60.0},
+        {"max_symbol_notional_usdc": 110.0},
+        {"amount_usdc": 30.0},
+        {"leverage": 6},
+    ],
+)
+def test_conflicting_risk_limits_are_rejected(
+    overrides: dict[str, object],
+) -> None:
+    with pytest.raises(ValueError):
+        valid_config(**overrides).validate()
+
+
+def test_mainnet_mapping_requires_explicit_risk_limits() -> None:
+    with pytest.raises(ValueError, match="explicit risk limits"):
+        TradingConfig.from_mapping(
+            {
+                "network": "mainnet",
+                "allow_mainnet": True,
+                "perpetual": {"symbols": list(SYMBOLS)},
+            },
+            mainnet_confirmation=MAINNET_CONFIRMATION,
+        )
+
+
+def test_mainnet_canary_mapping_accepts_one_symbol_and_explicit_limits() -> None:
+    config = TradingConfig.from_mapping(
+        {
+            "network": "mainnet",
+            "allow_mainnet": True,
+            "perpetual": {
+                "symbols": list(SYMBOLS),
+                "canary_mode": True,
+                "amountByUSDC": 12,
+                "leverage": 2,
+                "risk": {
+                    "max_order_notional_usdc": 12,
+                    "max_symbol_notional_usdc": 12,
+                    "max_total_notional_usdc": 12,
+                    "max_positions": 1,
+                    "max_leverage": 2,
+                    "min_free_collateral_usdc": 25,
+                },
+            },
+        },
+        mainnet_confirmation=MAINNET_CONFIRMATION,
+    )
+
+    assert config.network is Network.MAINNET
+    assert config.canary_mode is True
+    assert config.symbols == SYMBOLS
+
+
+@pytest.mark.parametrize(
+    ("timeframe", "expected"),
+    [
+        ("30m", datetime(2026, 8, 13, 12, 30, tzinfo=timezone.utc)),
+        ("2h", datetime(2026, 8, 13, 14, 0, tzinfo=timezone.utc)),
+        ("1d", datetime(2026, 8, 14, 0, 0, tzinfo=timezone.utc)),
+    ],
+)
+def test_validated_timeframes_have_scheduler_boundaries(
+    timeframe: str,
+    expected: datetime,
+) -> None:
+    now = datetime(2026, 8, 13, 12, 17, tzinfo=timezone.utc)
+    assert next_timeframe_boundary(now, timeframe) == expected

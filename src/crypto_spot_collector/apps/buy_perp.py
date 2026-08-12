@@ -24,7 +24,11 @@ from crypto_spot_collector.exchange.trailingstop.trailingstop_manager import (
 from crypto_spot_collector.exchange.types import PositionSide
 from crypto_spot_collector.notification.discord import discordNotification
 from crypto_spot_collector.providers.market_data_provider import MarketDataProvider
-from crypto_spot_collector.trading.config import SignalMode, TradingConfig
+from crypto_spot_collector.trading.config import (
+    SignalMode,
+    TradingConfig,
+    next_timeframe_boundary,
+)
 from crypto_spot_collector.trading.execution import PositionExecutionCoordinator
 from crypto_spot_collector.trading.order_state import (
     IdempotentOrderExecutor,
@@ -36,6 +40,7 @@ from crypto_spot_collector.trading.protection import (
     ProtectionError,
     ProtectionReconciler,
 )
+from crypto_spot_collector.trading.risk import EntryRiskGuard
 from crypto_spot_collector.trading.runtime import RuntimeSupervisor
 from crypto_spot_collector.trading.strategy import (
     CandleGate,
@@ -120,21 +125,6 @@ plt.rcParams["ytick.color"] = "#2C3E50"
 # -------
 
 
-# HyperLiquidで取引する永続シンボル
-perp_symbols = [
-    "BTC/USDC:USDC",
-    "ETH/USDC:USDC",
-    "XRP/USDC:USDC",
-    "SOL/USDC:USDC",
-    "HYPE/USDC:USDC",
-    "ZEC/USDC:USDC",
-    "FARTCOIN/USDC:USDC",
-    "LINK/USDC:USDC",
-    "AVAX/USDC:USDC",
-    "ADA/USDC:USDC",
-    "LTC/USDC:USDC",
-]
-
 logger.info("Initializing crypto perp collector script")
 secret_file = Path(__file__).parent / "secrets.json"
 settings_file = Path(__file__).parent / "settings.json"
@@ -145,9 +135,9 @@ secrets = load_config(secret_file, settings_file)
 # it is deliberately not stored in settings.json.
 trading_config = TradingConfig.from_mapping(
     secrets["settings"],
-    symbols=perp_symbols,
     mainnet_confirmation=os.getenv("HYPERLIQUID_MAINNET_CONFIRMATION", ""),
 )
+perp_symbols = list(trading_config.symbols)
 
 notificator = discordNotification(secrets["discord"]["discordWebhookUrlPerpetual"])
 importer = HistoricalDataImporter()
@@ -161,9 +151,7 @@ hyperliquid_exchange = HyperLiquidExchange(
 )
 logger.info("HyperLiquid exchange client initialized")
 
-sar_checker = SARChecker(
-    consecutive_count=secrets["settings"]["perpetual"]["consecutivePositiveCount"]
-)
+sar_checker = SARChecker(consecutive_count=trading_config.sar_consecutive_count)
 
 trailing_manager = TrailingStopManagerHyperLiquid()
 background_tasks: set[asyncio.Task] = set()
@@ -184,6 +172,14 @@ execution_coordinator = PositionExecutionCoordinator(
     protection_reconciler,
     expected_leverage=trading_config.leverage,
     expected_margin_mode=trading_config.margin_mode,
+)
+kill_switch_path = Path(trading_config.entry_kill_switch_file)
+if not kill_switch_path.is_absolute():
+    kill_switch_path = settings_file.parent / kill_switch_path
+entry_risk_guard = EntryRiskGuard(
+    hyperliquid_exchange,
+    trading_config,
+    kill_switch_path=kill_switch_path,
 )
 
 
@@ -660,49 +656,31 @@ async def signal_check_loop() -> None:
     """シグナルチェックループ: timeframeごとに実行"""
     logger.info("Starting signal check loop")
 
-    timeframe_perp = secrets["settings"]["perpetual"].get("timeframe", "5m")
+    timeframe_perp = trading_config.timeframe
 
     logger.info("---- Settings ----")
     logger.info("Discord notification: configured")
     logger.info(f"Perp Symbols: {perp_symbols}")
     logger.info(f"Timeframe: {timeframe_perp}")
-    logger.info(
-        f"Take Profit Rate: {secrets['settings']['perpetual']['take_profit_rate']}"
-    )
-    logger.info(f"Stop Loss Rate: {secrets['settings']['perpetual']['stop_loss_rate']}")
-    logger.info(f"Leverage: {secrets['settings']['perpetual']['leverage']}")
+    logger.info(f"Take Profit ROE: {trading_config.take_profit_roe}")
+    logger.info(f"Stop Loss ROE: {trading_config.stop_loss_roe}")
+    logger.info(f"Leverage: {trading_config.leverage}")
     logger.info("------------------")
 
     # 注文金額（USDC）
-    amount_by_usdc = secrets["settings"]["perpetual"].get("amountByUSDC", 10.0)
+    amount_by_usdc = trading_config.amount_usdc
 
     while True:
         # 次の実行時刻まで待機処理
         now = datetime.now(timezone.utc)
         logger.debug(f"Current time: {now}")
 
-        run_minute = int(timeframe_perp.replace("m", ""))
-
-        # 次の実行時刻を計算（run_minuteの倍数の分に実行）
-        current_minute = now.minute
-        # current_second = now.second
-
-        # 次の実行分を計算（run_minuteの倍数）
-        next_minute = ((current_minute // run_minute) + 1) * run_minute
-
-        if next_minute >= 60:
-            # 次の時間に繰り越し
-            next_run = (now + timedelta(hours=1)).replace(
-                minute=0, second=0, microsecond=0
-            )
-        else:
-            # 同じ時間内
-            next_run = now.replace(minute=next_minute, second=0, microsecond=0)
+        next_run = next_timeframe_boundary(now, timeframe_perp)
 
         wait_seconds = (next_run - now).total_seconds()
         logger.debug(
             f"Waiting for {wait_seconds:.1f} seconds until next run at {next_run} UTC "
-            f"(run every {run_minute} minutes: 0, {run_minute}, {run_minute*2}, ...)"
+            f"(timeframe={timeframe_perp})"
         )
         await asyncio.sleep(wait_seconds)
 
@@ -1005,10 +983,18 @@ async def execute_long_order(
             side="buy",
             amount=amount,
         )
-        receipt = await execution_coordinator.execute_entry(
-            intent,
-            expected_side="long",
+        reservation = await entry_risk_guard.reserve_entry(
+            symbol=symbol,
+            amount=amount,
+            price=prepared.reference_price,
         )
+        try:
+            receipt = await execution_coordinator.execute_entry(
+                intent,
+                expected_side="long",
+            )
+        finally:
+            await entry_risk_guard.release(reservation)
         order_state = receipt.order
         current_price = float(receipt.position.get("entryPrice") or 0)
         amount = abs(float(receipt.position.get("contracts") or 0))
@@ -1107,10 +1093,18 @@ async def execute_short_order(
             side="sell",
             amount=amount,
         )
-        receipt = await execution_coordinator.execute_entry(
-            intent,
-            expected_side="short",
+        reservation = await entry_risk_guard.reserve_entry(
+            symbol=symbol,
+            amount=amount,
+            price=prepared.reference_price,
         )
+        try:
+            receipt = await execution_coordinator.execute_entry(
+                intent,
+                expected_side="short",
+            )
+        finally:
+            await entry_risk_guard.release(reservation)
         order_state = receipt.order
         current_price = float(receipt.position.get("entryPrice") or 0)
         amount = abs(float(receipt.position.get("contracts") or 0))

@@ -151,6 +151,11 @@ class HyperLiquidExchange(IExchange):
         free_usdt = balance["free"]["USDC"]
         return float(free_usdt)
 
+    async def fetch_free_collateral(self) -> float:
+        """Return free USDC collateral for the entry risk gate."""
+
+        return await self.fetch_free_usdt_async()
+
     async def fetch_price_async(self, symbol: str) -> dict[Any, Any]:
         logger.debug(f"Fetching price for {symbol} asynchronously")
         ticker: dict[Any, Any] = await self.rest.call(
@@ -307,7 +312,9 @@ class HyperLiquidExchange(IExchange):
             return None
         return dict(order)
 
-    async def fetch_open_orders(self, symbol: str) -> list[dict[str, Any]]:
+    async def fetch_open_orders(
+        self, symbol: str | None = None
+    ) -> list[dict[str, Any]]:
         return list(
             await self.rest.call(
                 "fetch_open_orders",

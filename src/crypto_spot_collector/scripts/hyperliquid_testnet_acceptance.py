@@ -178,6 +178,12 @@ async def run(monitor_seconds: int, sample_seconds: int) -> dict[str, Any]:
         sar_consecutive_count=1,
         sar_close_consecutive_count=1,
         price_change_threshold_percent=1.0,
+        max_order_notional_usdc=25.0,
+        max_symbol_notional_usdc=25.0,
+        max_total_notional_usdc=25.0,
+        max_positions=1,
+        max_leverage=LEVERAGE,
+        min_free_collateral_usdc=0.0,
     )
 
     exchange = HyperLiquidExchange(

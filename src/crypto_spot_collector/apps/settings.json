@@ -18,7 +18,23 @@
             }
         ],
         "perpetual": {
+            "symbols": [
+                "BTC/USDC:USDC",
+                "ETH/USDC:USDC",
+                "XRP/USDC:USDC",
+                "SOL/USDC:USDC",
+                "HYPE/USDC:USDC",
+                "ZEC/USDC:USDC",
+                "FARTCOIN/USDC:USDC",
+                "LINK/USDC:USDC",
+                "AVAX/USDC:USDC",
+                "ADA/USDC:USDC",
+                "LTC/USDC:USDC"
+            ],
             "signal_mode": "sar_only",
+            "canary_mode": false,
+            "entries_enabled": true,
+            "entry_kill_switch_file": "state/ENTRY_KILL_SWITCH",
             "timeframe": "30m",
             "leverage": 20,
             "margin_mode": "cross",
@@ -29,7 +45,15 @@
             "price_change_threshold_percent": 999,
             "trailing_stop_interval_minutes": 3,
             "trailing_stop_activation_pnl_percent": 7.0,
-            "sar_close_consecutive_count": 2
+            "sar_close_consecutive_count": 2,
+            "risk": {
+                "max_order_notional_usdc": 200.0,
+                "max_symbol_notional_usdc": 200.0,
+                "max_total_notional_usdc": 400.0,
+                "max_positions": 2,
+                "max_leverage": 20,
+                "min_free_collateral_usdc": 25.0
+            }
         },
         "network": "testnet",
         "sandbox_mode": true,

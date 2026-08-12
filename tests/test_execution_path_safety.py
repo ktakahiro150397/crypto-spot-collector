@@ -40,6 +40,12 @@ def _valid_config(**overrides: object) -> TradingConfig:
         "sar_consecutive_count": 4,
         "sar_close_consecutive_count": 2,
         "price_change_threshold_percent": 999.0,
+        "max_order_notional_usdc": 25.0,
+        "max_symbol_notional_usdc": 50.0,
+        "max_total_notional_usdc": 100.0,
+        "max_positions": 2,
+        "max_leverage": 5,
+        "min_free_collateral_usdc": 10.0,
     }
     values.update(overrides)
     return TradingConfig(**values)  # type: ignore[arg-type]
@@ -76,6 +82,35 @@ def test_executable_paths_cannot_call_raw_or_legacy_order_apis() -> None:
                         f"{path.name}:{node.lineno}:unvalidated HyperLiquidExchange"
                     )
     assert violations == []
+
+
+def test_production_app_has_no_hard_coded_symbols_or_raw_setting_bypass() -> None:
+    app_path = (
+        REPOSITORY_ROOT / "src" / "crypto_spot_collector" / "apps" / "buy_perp.py"
+    )
+    tree = ast.parse(app_path.read_text(encoding="utf-8"), filename=str(app_path))
+    hard_coded_symbol_lists: list[int] = []
+    raw_settings_reads: list[int] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Assign) and any(
+            isinstance(target, ast.Name) and target.id == "perp_symbols"
+            for target in node.targets
+        ):
+            if isinstance(node.value, (ast.List, ast.Tuple)):
+                hard_coded_symbol_lists.append(node.lineno)
+        if (
+            isinstance(node, ast.Subscript)
+            and isinstance(node.value, ast.Name)
+            and node.value.id == "secrets"
+            and isinstance(node.slice, ast.Constant)
+            and node.slice.value == "settings"
+        ):
+            raw_settings_reads.append(node.lineno)
+
+    assert hard_coded_symbol_lists == []
+    # One read is required to construct TradingConfig; runtime code may not
+    # return to the raw settings mapping after that boundary.
+    assert len(raw_settings_reads) == 1
 
 
 def test_exchange_rejects_unvalidated_mainnet_before_client_creation() -> None:

@@ -61,6 +61,29 @@
 - Startup reconciles every non-terminal SQLite intent before strategy workers
   start. Unknown or otherwise unresolved state prevents startup.
 
+## Entry risk boundary and kill switch
+
+- The symbol allowlist comes only from validated `perpetual.symbols`; the app
+  contains no fallback trading-symbol list. `canary_mode=true` requires exactly
+  one symbol and `max_positions=1`.
+- Every entry reserves risk against a fresh all-position, all-open-order and
+  free-collateral snapshot. It enforces order, per-symbol and total notional,
+  maximum leverage, concurrent-position count and post-order collateral floor.
+  Existing target positions, out-of-allowlist exposure, pending entry orders
+  and protection orders without a position all fail closed.
+- Concurrent signals are counted through in-process reservations, so two
+  signals cannot both pass using the same remaining limit.
+- Set `perpetual.entries_enabled=false` for a startup-time entry stop. For an
+  immediate runtime stop, create
+  `src/crypto_spot_collector/apps/state/ENTRY_KILL_SWITCH` (or the configured
+  path). The file is checked before every entry reservation. Removing it
+  re-enables entries only if all other gates pass.
+- The entry kill switch is intentionally not consulted by startup/reconnect
+  protection reconciliation, trailing updates, or reduce-only closes.
+- `TradingConfig` is the only runtime source for symbols, timeframe, order
+  amount, leverage, strategy, trailing and risk values. The scheduler uses the
+  same minute/hour/day parser as validation.
+
 ## REST policy
 
 - Read-only calls use a 15-second timeout, at most four attempts, exponential
