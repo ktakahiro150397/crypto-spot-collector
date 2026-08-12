@@ -2,6 +2,7 @@ import json
 from typing import Any
 
 import pytest
+from loguru import logger
 
 from crypto_spot_collector.exchange.hyperliquid_ws import HyperLiquidWebSocket
 
@@ -35,7 +36,10 @@ class FakeWebSocket:
 async def test_duplicate_subscription_sends_once() -> None:
     client = HyperLiquidWebSocket(testnet=True)
     client.ws = FakeWebSocket()  # type: ignore[assignment]
-    callback = lambda _payload: None
+
+    def callback(_payload: Any) -> None:
+        return None
+
     await client.subscribe_candle("BTC", "30m", callback)
     await client.subscribe_candle("BTC", "30m", callback)
     assert len(client.ws.sent) == 1  # type: ignore[union-attr]
@@ -59,6 +63,33 @@ async def test_duplicate_payload_dispatches_once() -> None:
     client._callbacks["candle_BTC_30m"] = calls.append
     await client.listen()
     assert len(calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_user_fill_logs_do_not_expose_wallet_address() -> None:
+    address = "0x27a70dc0656bef760242d5f923be51e638c93b20"
+    payload = json.dumps(
+        {
+            "channel": "userFills",
+            "data": {"user": address, "fills": []},
+        }
+    )
+    websocket = FakeWebSocket([payload])
+    client = HyperLiquidWebSocket(testnet=False)
+    client.ws = websocket  # type: ignore[assignment]
+    client._running = True
+    websocket.after_last = lambda: setattr(client, "_running", False)
+    calls: list[Any] = []
+    client._callbacks[f"userFills_{address}"] = calls.append
+    messages: list[str] = []
+    sink = logger.add(messages.append, level="DEBUG", format="{message}")
+    try:
+        await client.listen()
+    finally:
+        logger.remove(sink)
+
+    assert len(calls) == 1
+    assert all(address not in message for message in messages)
 
 
 @pytest.mark.asyncio

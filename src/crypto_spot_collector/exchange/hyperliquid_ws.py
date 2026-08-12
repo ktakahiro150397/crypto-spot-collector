@@ -9,11 +9,12 @@ import inspect
 import json
 import random
 from collections import deque
+from types import TracebackType
 from typing import Any, Awaitable, Callable, Optional
 
 import websockets
 from loguru import logger
-from websockets.client import WebSocketClientProtocol
+from websockets.client import WebSocketClientProtocol  # type: ignore[attr-defined]
 
 
 class HyperLiquidWebSocket:
@@ -355,9 +356,7 @@ class HyperLiquidWebSocket:
                             if sub_key in self._callbacks:
                                 await self._run_callback(sub_key, candle_data)
                             else:
-                                logger.warning(
-                                    f"No callback found for {sub_key}. Available callbacks: {list(self._callbacks.keys())}"
-                                )
+                                logger.warning(f"No callback found for {sub_key}")
                     elif data.get("channel") == "trades":
                         trade_data = data.get("data", [])
                         logger.debug(f"Received trade data: {trade_data}")
@@ -376,9 +375,7 @@ class HyperLiquidWebSocket:
                             if sub_key in self._callbacks:
                                 await self._run_callback(sub_key, trade_data)
                             else:
-                                logger.warning(
-                                    f"No callback found for {sub_key}. Available callbacks: {list(self._callbacks.keys())}"
-                                )
+                                logger.warning(f"No callback found for {sub_key}")
                     elif data.get("channel") == "userFills":
                         user_fills_data = data.get("data", None)
                         logger.debug("Received authenticated user fill event")
@@ -388,12 +385,13 @@ class HyperLiquidWebSocket:
 
                             # Find and call the appropriate callback
                             sub_key = f"userFills_{user}"
-                            logger.debug(f"Looking for callback with key: {sub_key}")
+                            logger.debug("Looking for authenticated userFills callback")
                             if sub_key in self._callbacks:
                                 await self._run_callback(sub_key, user_fills_data)
                             else:
                                 logger.warning(
-                                    f"No callback found for {sub_key}. Available callbacks: {list(self._callbacks.keys())}"
+                                    "No callback found for authenticated userFills "
+                                    "subscription"
                                 )
                     else:
                         logger.debug(
@@ -449,6 +447,11 @@ class HyperLiquidWebSocket:
         await self.connect()
         return self
 
-    async def __aexit__(self, exc_type, exc_val, exc_tb) -> None:
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
+    ) -> None:
         """Async context manager exit."""
         await self.disconnect()
