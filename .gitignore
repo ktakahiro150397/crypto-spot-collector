@@ -180,9 +180,10 @@ logs/
 .env.*.local
 secrets.json
 src/crypto_spot_collector/apps/state/ENTRY_KILL_SWITCH
+deploy/secrets/*.json
+!deploy/secrets/*.json.sample
 
 # Node modules (if using Node.js tools)
 node_modules/
 
 # Docker
-.dockerignore

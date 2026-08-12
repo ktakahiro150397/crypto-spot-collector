@@ -1,6 +1,6 @@
 FROM python:3.11.14-slim
 
-# Install MySQL client
+# Install runtime health/debug dependencies only.
 RUN apt-get update && apt-get install -y default-mysql-client && rm -rf /var/lib/apt/lists/*
 
 # Install uv
@@ -13,14 +13,8 @@ ENV PATH="/bin/:$PATH"
 # Make uv available to all users
 RUN ln -s /root/.cargo/bin/uv /usr/local/bin/uv
 
-# Install git
-RUN apt-get update && apt-get install -y git && rm -rf /var/lib/apt/lists/*
-
 # Set up app directory
 WORKDIR /app
-
-# Copy git directory for version information
-COPY .git /app/.git
 
 # Copy application files
 COPY /src /app

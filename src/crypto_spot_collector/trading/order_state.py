@@ -142,6 +142,9 @@ class SQLiteOrderIntentStore:
 
     def _initialize(self) -> None:
         with self._transaction() as connection:
+            health = connection.execute("PRAGMA quick_check").fetchone()
+            if health is None or health[0] != "ok":
+                raise sqlite3.DatabaseError("order intent database quick_check failed")
             connection.execute("PRAGMA journal_mode=WAL")
             connection.execute(
                 """

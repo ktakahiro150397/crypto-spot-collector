@@ -112,6 +112,10 @@ cancelled, then WebSocket and both CCXT clients are closed. Startup, reconnect,
 heartbeat, fatal error and shutdown notifications contain no wallet address,
 key or webhook value.
 
+Deployment, environment-separated secrets, persistent state, healthcheck,
+backup/restore and rollback procedures are documented in
+`docs/hyperliquid-deployment-runbook.md`.
+
 ## Dead man's switch decision
 
 Hyperliquid `scheduleCancel` is **not enabled**. It cancels resting orders and

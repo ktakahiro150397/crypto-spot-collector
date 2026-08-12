@@ -146,8 +146,6 @@ class HyperLiquidExchange(IExchange):
         logger.debug("Fetching free USDT balance asynchronously")
         balance = await self.fetch_balance_async()
 
-        logger.debug(f"Balance data: {balance}")
-
         free_usdt = balance["free"]["USDC"]
         return float(free_usdt)
 
@@ -628,9 +626,7 @@ class HyperLiquidExchange(IExchange):
         await self.ws_client.subscribe_userFills(
             walletAddress=self.exchange_public.walletAddress, callback=callback
         )
-        logger.info(
-            f"Subscribed to user fills data via WebSocket (wallet: {self.exchange_public.walletAddress})"
-        )
+        logger.info("Subscribed to authenticated user fills data")
 
     async def start_ws_listener(self) -> None:
         """

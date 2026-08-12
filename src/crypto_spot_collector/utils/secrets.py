@@ -6,7 +6,7 @@ from loguru import logger
 def load_secrets(secrets_path: str) -> Any:
     import json
 
-    logger.info(f"Loading secrets from {secrets_path}")
+    logger.info("Loading secrets from configured runtime source")
     with open(secrets_path, "r") as f:
         secrets = json.load(f)
     logger.info("Secrets loaded successfully")
@@ -16,7 +16,7 @@ def load_secrets(secrets_path: str) -> Any:
 def load_settings(settings_path: str) -> Any:
     import json
 
-    logger.info(f"Loading settings from {settings_path}")
+    logger.info("Loading settings from configured runtime source")
     with open(settings_path, "r") as f:
         settings = json.load(f)
     logger.info("Settings loaded successfully")

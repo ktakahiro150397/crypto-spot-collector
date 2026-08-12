@@ -1,0 +1,33 @@
+{
+    "settings": {
+        "network": "mainnet",
+        "sandbox_mode": false,
+        "allow_mainnet": false,
+        "perpetual": {
+            "symbols": ["REPLACE_WITH_APPROVED_SYMBOL/USDC:USDC"],
+            "signal_mode": "sar_only",
+            "canary_mode": true,
+            "entries_enabled": false,
+            "entry_kill_switch_file": "/var/lib/crypto-spot-collector/ENTRY_KILL_SWITCH",
+            "timeframe": "30m",
+            "leverage": 1,
+            "margin_mode": "cross",
+            "take_profit_rate": 3.0,
+            "stop_loss_rate": 0.2,
+            "amountByUSDC": 0,
+            "consecutivePositiveCount": 4,
+            "price_change_threshold_percent": 999,
+            "trailing_stop_interval_minutes": 3,
+            "trailing_stop_activation_pnl_percent": 7.0,
+            "sar_close_consecutive_count": 2,
+            "risk": {
+                "max_order_notional_usdc": 0,
+                "max_symbol_notional_usdc": 0,
+                "max_total_notional_usdc": 0,
+                "max_positions": 1,
+                "max_leverage": 1,
+                "min_free_collateral_usdc": 0
+            }
+        }
+    }
+}

@@ -29,6 +29,11 @@ from crypto_spot_collector.trading.config import (
     TradingConfig,
     next_timeframe_boundary,
 )
+from crypto_spot_collector.trading.deployment import (
+    RuntimeState,
+    required_runtime_path,
+    validate_deployment_secrets,
+)
 from crypto_spot_collector.trading.execution import PositionExecutionCoordinator
 from crypto_spot_collector.trading.order_state import (
     IdempotentOrderExecutor,
@@ -126,8 +131,9 @@ plt.rcParams["ytick.color"] = "#2C3E50"
 
 
 logger.info("Initializing crypto perp collector script")
-secret_file = Path(__file__).parent / "secrets.json"
-settings_file = Path(__file__).parent / "settings.json"
+secret_file = required_runtime_path("HYPERLIQUID_SECRETS_FILE")
+settings_file = required_runtime_path("HYPERLIQUID_SETTINGS_FILE")
+state_directory = required_runtime_path("HYPERLIQUID_STATE_DIR")
 secrets = load_config(secret_file, settings_file)
 
 # Validate every safety-critical setting before constructing clients or opening
@@ -138,15 +144,34 @@ trading_config = TradingConfig.from_mapping(
     mainnet_confirmation=os.getenv("HYPERLIQUID_MAINNET_CONFIRMATION", ""),
 )
 perp_symbols = list(trading_config.symbols)
+deployment_secrets = validate_deployment_secrets(
+    secrets,
+    trading_config,
+    expected_network=os.getenv("HYPERLIQUID_DEPLOYMENT_NETWORK", ""),
+)
+runtime_state = RuntimeState.open(
+    state_directory,
+    wallet_address=deployment_secrets["mainWalletAddress"],
+    config=trading_config,
+)
+logger.info(
+    "Validated deployment: "
+    f"network={trading_config.network.value}, symbols={perp_symbols}, "
+    f"canary={trading_config.canary_mode}, "
+    f"max_order_usdc={trading_config.max_order_notional_usdc}, "
+    f"max_total_usdc={trading_config.max_total_notional_usdc}, "
+    f"max_positions={trading_config.max_positions}, "
+    f"max_leverage={trading_config.max_leverage}"
+)
 
-notificator = discordNotification(secrets["discord"]["discordWebhookUrlPerpetual"])
+notificator = discordNotification(deployment_secrets["discordWebhookUrlPerpetual"])
 importer = HistoricalDataImporter()
 logger.info("Discord notification and historical data importer initialized")
 
 hyperliquid_exchange = HyperLiquidExchange(
-    mainWalletAddress=secrets["hyperliquid"]["mainWalletAddress"],
-    apiWalletAddress=secrets["hyperliquid"]["apiWalletAddress"],
-    privateKey=secrets["hyperliquid"]["privatekey"],
+    mainWalletAddress=deployment_secrets["mainWalletAddress"],
+    apiWalletAddress=deployment_secrets["apiWalletAddress"],
+    privateKey=deployment_secrets["privatekey"],
     trading_config=trading_config,
 )
 logger.info("HyperLiquid exchange client initialized")
@@ -156,7 +181,7 @@ sar_checker = SARChecker(consecutive_count=trading_config.sar_consecutive_count)
 trailing_manager = TrailingStopManagerHyperLiquid()
 background_tasks: set[asyncio.Task] = set()
 candle_gate = CandleGate()
-runtime_state_path = Path(__file__).parent / "state" / "order_intents.sqlite"
+runtime_state_path = runtime_state.database_path
 order_intent_store = SQLiteOrderIntentStore(runtime_state_path)
 sar_state_store = SQLiteSarStateStore(runtime_state_path)
 order_executor = IdempotentOrderExecutor(hyperliquid_exchange, order_intent_store)
@@ -175,7 +200,7 @@ execution_coordinator = PositionExecutionCoordinator(
 )
 kill_switch_path = Path(trading_config.entry_kill_switch_file)
 if not kill_switch_path.is_absolute():
-    kill_switch_path = settings_file.parent / kill_switch_path
+    kill_switch_path = state_directory / kill_switch_path
 entry_risk_guard = EntryRiskGuard(
     hyperliquid_exchange,
     trading_config,
@@ -650,6 +675,12 @@ async def heartbeat_loop(interval_seconds: float = 900.0) -> None:
             ),
             files=[],
         )
+
+
+async def health_pulse_loop(interval_seconds: float = 20.0) -> None:
+    while True:
+        runtime_state.health.write("running")
+        await asyncio.sleep(interval_seconds)
 
 
 async def signal_check_loop() -> None:
@@ -1446,7 +1477,7 @@ async def main() -> None:
         f"Starting crypto perp collector application on {trading_config.network.value}"
     )
     supervisor = RuntimeSupervisor(
-        [hyperliquid_exchange],
+        [runtime_state, hyperliquid_exchange],
         on_shutdown_requested=order_executor.stop_accepting,
     )
     supervisor.install_signal_handlers()
@@ -1480,6 +1511,7 @@ async def main() -> None:
             ),
             files=[],
         )
+        runtime_state.health.write("running")
 
         await supervisor.run(
             [
@@ -1488,6 +1520,7 @@ async def main() -> None:
                 trailing_stop_loop(),
                 close_position_notification_loop(),
                 heartbeat_loop(),
+                health_pulse_loop(),
             ]
         )
     except Exception as exc:

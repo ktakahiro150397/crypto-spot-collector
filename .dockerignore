@@ -1,0 +1,11 @@
+.git
+.env*
+.venv
+__pycache__
+*.pyc
+*.sqlite*
+*.db
+logs
+backups
+src/crypto_spot_collector/apps/secrets.json
+deploy/secrets/*.json
