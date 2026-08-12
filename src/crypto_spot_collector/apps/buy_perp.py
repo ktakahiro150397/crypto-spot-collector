@@ -803,21 +803,28 @@ async def check_signal(
     symbol: str,
     timeframe: str,
     amountByUSDC: float,
+    *,
+    controlled_dataframe: pd.DataFrame | None = None,
 ) -> None:
     """シグナルをチェックし、ロング/ショートのオーダーを発注する。"""
 
     logger.debug(f"Checking signal for {symbol} from {startDate} to {endDate}")
 
-    # Use MarketDataProvider to get DataFrame with indicators
-    data_provider = MarketDataProvider()
-    df = data_provider.get_dataframe_with_indicators(
-        symbol=symbol,
-        interval=timeframe,
-        from_datetime=startDate,
-        to_datetime=endDate,
-        sma_windows=[20, 50],
-        sar_config={"step": 0.02, "max_step": 0.2},
-    )
+    if controlled_dataframe is not None:
+        if not trading_config.testnet:
+            raise RuntimeError("controlled candle input is restricted to testnet")
+        df = controlled_dataframe.copy()
+    else:
+        # Use MarketDataProvider to get DataFrame with indicators
+        data_provider = MarketDataProvider()
+        df = data_provider.get_dataframe_with_indicators(
+            symbol=symbol,
+            interval=timeframe,
+            from_datetime=startDate,
+            to_datetime=endDate,
+            sma_windows=[20, 50],
+            sar_config={"step": 0.02, "max_step": 0.2},
+        )
 
     logger.debug(f"Retrieved {len(df)} OHLCV records for {symbol}")
 
@@ -1087,6 +1094,7 @@ async def execute_long_order(
         await notificator.send_notification_async(
             message=f"Error creating long order for {symbol}: {e}", files=[]
         )
+        raise
 
 
 async def execute_short_order(
@@ -1198,6 +1206,7 @@ async def execute_short_order(
         await notificator.send_notification_async(
             message=f"Error creating short order for {symbol}: {e}", files=[]
         )
+        raise
 
 
 def embed_object_create_helper_perp(

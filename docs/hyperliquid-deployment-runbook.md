@@ -102,3 +102,26 @@ and the generated backup name. If the new container is unhealthy:
 
 Never use `docker compose down -v` for rollback; it deletes the persistent
 state volume.
+
+## Pre-mainnet canary gate
+
+Before requesting approval for a mainnet canary, run the production-path
+acceptance while the testnet account is globally flat:
+
+```powershell
+uv run python -m crypto_spot_collector.scripts.hyperliquid_testnet_acceptance `
+  --monitor-seconds 600 --sample-seconds 5 --initial-side long
+```
+
+Require a successful result with `mainnet_operations=0`, stale-SAR rejection,
+both directional entries protected by exactly TP and SL, duplicate-intent
+suppression, WebSocket reconnect, restart recovery, trailing activation and
+non-retreat, opposite-SAR flat-before-reverse, zero unsettled intents, and final
+flat/zero-open-orders state. If natural price movement does not permit a safe
+trailing activation, the runner fails and cleans up; do not weaken or fake the
+profit-side price condition.
+
+On the deployment host, build the exact commit, start with entries disabled,
+verify the persistent-state healthcheck and sanitized logs, and record the
+rollback image/state backup. Mainnet still requires a separate explicit
+authorization plus the network, allow flag, and confirmation-phrase interlocks.

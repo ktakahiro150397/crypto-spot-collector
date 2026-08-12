@@ -87,6 +87,71 @@ async def test_missing_pair_is_created_from_exchange_position() -> None:
 
 
 @pytest.mark.asyncio
+async def test_verification_retries_eventually_consistent_order_snapshot() -> None:
+    class DelayedVisibilityAdapter(FakeProtectionAdapter):
+        def __init__(self) -> None:
+            super().__init__()
+            self.fetch_count = 0
+
+        async def fetch_open_orders(self, symbol: str) -> Sequence[dict[str, Any]]:
+            self.fetch_count += 1
+            orders = list(self.orders)
+            if self.fetch_count == 2 and len(orders) == 2:
+                return orders[:1]
+            return orders
+
+    adapter = DelayedVisibilityAdapter()
+    adapter.positions = [position()]
+    report = await ProtectionReconciler(
+        adapter,
+        take_profit_roe=3.0,
+        stop_loss_roe=0.2,
+        leverage=20,
+        verification_attempts=3,
+        verification_delay=0,
+    ).reconcile_symbol("BTC/USDC:USDC")
+
+    assert report.position is not None
+    assert adapter.fetch_count == 3
+
+
+@pytest.mark.asyncio
+async def test_nested_hyperliquid_order_payload_is_verified_by_cloid() -> None:
+    class NestedPayloadAdapter(FakeProtectionAdapter):
+        async def create_protection_order(self, spec: ProtectionSpec) -> dict[str, Any]:
+            self.created.append(spec)
+            order_type = (
+                "Take Profit Market" if spec.kind == "take_profit" else "Stop Market"
+            )
+            order = {
+                "id": f"new-{spec.kind}",
+                "clientOrderId": spec.cloid,
+                "amount": spec.amount,
+                "triggerPrice": round(spec.trigger_price, 2),
+                "reduceOnly": None,
+                "type": "market",
+                "info": {
+                    "order": {
+                        "orderType": order_type,
+                        "triggerPx": str(round(spec.trigger_price, 2)),
+                        "reduceOnly": True,
+                        "cloid": spec.cloid,
+                    }
+                },
+            }
+            self.orders.append(order)
+            return order
+
+    adapter = NestedPayloadAdapter()
+    adapter.positions = [position()]
+
+    report = await reconciler(adapter).reconcile_symbol("BTC/USDC:USDC")
+
+    assert report.position is not None
+    assert {spec.kind for spec in adapter.created} == {"take_profit", "stop_loss"}
+
+
+@pytest.mark.asyncio
 async def test_old_orders_cancel_only_after_new_pair_verified() -> None:
     adapter = FakeProtectionAdapter()
     adapter.positions = [position(contracts=2.0)]

@@ -1,107 +1,97 @@
-# HyperLiquid testnet acceptance — 2026-08-13
+# HyperLiquid production-path testnet acceptance — 2026-08-13
 
-## Scope and safety boundary
+## Result
 
-- Network: HyperLiquid testnet only. No mainnet endpoint, balance, order, or
-  position operation was used.
-- Acceptance symbol: `BTC/USDC:USDC`, selected only after the exchange reported
-  it flat.
-- Acceptance notional: approximately 12.62 USDC at 3x leverage.
-- A pre-existing `ETH/USDC:USDC` long was preserved and protected rather than
-  included in the destructive transition scenario.
-- The runner loads credentials from the ignored `.env` file, requires
-  `HYPERLIQUID_TESTNET=true`, and never writes an address or private key to its
-  report.
+The production SAR runtime path passed a destructive end-to-end acceptance on
+HyperLiquid testnet. No mainnet endpoint, balance, order, or position operation
+was used. The test ended with the account flat for the selected symbol and zero
+open orders.
 
-## Testnet findings addressed before the run
+The runner imported the production `buy_perp` application and used its normal
+configuration parser, SAR strategy transition, durable order executor, entry
+risk gate, TP/SL reconciler, trailing manager, restart recovery, WebSocket
+client, and graceful-shutdown supervisor. The only injected input was a
+testnet-only controlled closed-candle DataFrame; production/mainnet rejects that
+input path.
 
-1. Testnet spot metadata included malformed entries. The testnet adapter now
-   loads perpetual markets only; the mainnet adapter is unchanged.
-2. A private key without the optional `0x` prefix is normalized locally.
-3. Protection prices now use the leverage reported on the actual exchange
-   position.
-4. HyperLiquid rounds trigger prices to market precision. Pair verification now
-   accepts only a small rounding tolerance (`5e-5` relative), while materially
-   different protection levels still fail.
-5. A stop price already crossed by the current market is rejected before any
-   new protection order is created. The required recovery is an explicit
-   reduce-only close.
-6. A filled market order can be returned without a normalized status, and the
-   lookup-by-cloid snapshot can remain `open`. The durable state machine now
-   reconciles the immutable fill ledger by cloid before trusting that snapshot.
-7. SQLite state connections are explicitly closed, including failure and
-   cleanup paths on Windows.
-
-The crossed-stop case was encountered on a pre-existing BTC testnet long
-(`0.00617` BTC, entry `92322`). Its configured stop was already above the live
-market near `63132`, so the position was closed reduce-only and its residual
-orders were cancelled. No automatic retry or reversal was performed in that
-recovery step.
-
-## Continuous acceptance result
+## Final run
 
 Command:
 
 ```powershell
-$env:PYTHONPATH='src'
-.\.venv\Scripts\python.exe -m crypto_spot_collector.scripts.hyperliquid_testnet_acceptance --monitor-seconds 600 --sample-seconds 10
+uv run python -m crypto_spot_collector.scripts.hyperliquid_testnet_acceptance `
+  --monitor-seconds 180 --sample-seconds 2 --initial-side short
 ```
 
-Observed result:
+The runner requires `HYPERLIQUID_TESTNET=true`, refuses to select mainnet,
+requires the entire testnet account to be flat before it begins, disables
+external notifications, and never emits the wallet address, private key, or
+webhook in its result.
 
-| Check | Result |
+| Check | Observed result |
 |---|---|
-| Continuous protected hold | 600.0 seconds |
-| REST position/protection samples | 54 |
-| Measured unprotected time | 0.0 seconds |
-| WebSocket trade messages | 29 |
-| Forced reconnect and reconciliation | 0.266 seconds, passed |
-| Additional natural reconnect | passed; subscriptions restored |
-| Duplicate long intent | same order, one submission |
-| Long → confirmed flat | passed |
-| Flat → short | passed |
-| Duplicate short intent | same order, one submission |
-| Short → confirmed flat | passed |
-| Final BTC position | flat |
-| Final BTC open orders | 0 |
+| Selected symbol | `ARB/USDC:USDC` |
+| Stale SAR interval | Rejected; no order |
+| Short entry | Filled; exactly two reduce-only TP/SL orders |
+| Duplicate closed candle | Zero additional intents |
+| Durable restart | Position and both protections restored; no replay |
+| Forced WebSocket disconnect | Reconnected and restored subscription in 0.266 s |
+| Protected monitoring | 5 samples; measured unprotected time 0.0 s |
+| Trailing activation | Activated after 29.17 s of safe favorable movement |
+| Stop movement | Short stop moved from `0.07716` to break-even `0.0764` |
+| Restart after trailing update | Stop recovered without retreat |
+| Opposite SAR | Reduce-only close; flat proven before reversal |
+| Long reversal | Filled only after flat; exactly two TP/SL orders |
+| External/manual settlement | Reconciled through the production adapter |
+| Durable intents | 3 filled, 0 unsettled |
+| Final state | Account independently verified flat, zero open orders, zero unresolved errors |
 
-The runner also reconciled TP/SL after every reconnect. HyperLiquid-created
-attached TP/SL matched the desired production specifications, so no replacement
-orders were needed during the successful run.
+Earlier testnet runs additionally held both a long and a short with continuous
+TP/SL monitoring for 300 seconds per side. A safe favorable trailing condition
+did not occur during those windows, so those runs deliberately did not force a
+trailing update.
 
-## Preserved position and final exchange state
+## Findings fixed during acceptance
 
-At the end of acceptance, the pre-existing ETH testnet position remained long
-`0.1553` ETH at 3x leverage. Its two exchange-visible reduce-only protections
-were independently verified:
+1. Unified/portfolio-margin collateral is exposed through HyperLiquid's spot
+   clearinghouse balance. The entry risk gate now selects that balance after
+   checking account-abstraction mode and fails closed on unknown modes.
+2. HyperLiquid condition orders can be temporarily absent from an immediately
+   following open-order snapshot. Verification now retries while keeping prior
+   protection intact.
+3. CCXT may place native condition-order fields under `info.order`. TP/SL
+   verification now handles both response shapes and uses the deterministic
+   cloid as the authoritative identity when present.
+4. Production entry helpers now propagate execution-safety failures to the
+   supervisor after attempting notification, instead of logging and continuing.
+5. The Windows acceptance runner tolerates delayed release of its disposable
+   SQLite directory without changing the durable-state assertions.
 
-- Take-profit market trigger: `3899.4`
-- Stop market trigger: `1819.7`
+## Automated evidence
 
-BTC was independently verified flat with zero open orders after the runner
-finished.
+- Full regression suite: 172 passed.
+- Changed-file `flake8`: passed.
+- Changed-file `mypy`: passed.
+- Coverage includes duplicate intents, unknown/timeouts, partial fills, stale
+  snapshots, nested condition-order payloads, protection replacement ordering,
+  trailing-stop monotonicity, reconnect deduplication, shutdown, network
+  interlocks, unified collateral, and SAR transitions.
 
-## Automated regression evidence
+A live partial fill is not forced because a small testnet market order cannot
+reliably cause one. The equivalent partial/unknown-state recovery paths are
+covered deterministically by adapter tests.
 
-The full suite covers deterministic duplicate intents, timeout/unknown
-reconciliation, partial fills, stale order snapshots, exchange-price rounding,
-crossed stops, trailing-stop monotonicity, reconnect deduplication, REST retry
-and circuit-breaker behavior, shutdown ordering, network interlocks, strategy
-transitions, and legacy SAR/average-price regressions.
+## Mainnet go/no-go
 
-Live partial fills are not forced because the matching engine cannot guarantee
-one for a small market order. The fill aggregation and recovery path is covered
-with deterministic adapter tests and was additionally exercised by a real
-two-fill reduce-only BTC cleanup during the exploratory testnet run.
+**GO for a separately approved, one-symbol, minimum-notional mainnet canary.**
+This does not authorize a mainnet connection or order. Before that run, the
+operator must create the uncommitted mainnet secret/settings files, build the
+image on a functioning Docker host, verify the healthcheck, obtain explicit
+approval, and enable all three mainnet interlocks. Unattended or multi-symbol
+mainnet rollout remains a no-go until the canary is observed and closed or left
+protected according to the approved plan.
 
-## Mainnet staged-acceptance gate
-
-Mainnet remains disabled. Enabling it requires all three production interlocks
-(`network=mainnet`, `allow_mainnet=true`, and the exact environment confirmation
-phrase), plus explicit user approval for that operation.
-
-The first approved mainnet canary should use one liquid symbol, one minimum-size
-position, the same duplicate-intent and TP/SL checks, and continuous monitoring.
-Rollback is: stop accepting new intents, reconcile the cloid/fill ledger, close
-the canary reduce-only, cancel only verified orphan protection orders, confirm
-flat/no-open-orders, and return configuration to testnet.
+Rollback is: engage the entry kill switch, inhibit new intents, reconcile the
+cloid/fill ledger, reduce-only close the canary if required, cancel only verified
+orphan protection orders, confirm flat/no-open-orders, and restore the prior
+image without deleting the persistent state volume.

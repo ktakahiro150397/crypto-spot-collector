@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import math
 from dataclasses import dataclass
@@ -66,11 +67,17 @@ class ProtectionReconciler:
         take_profit_roe: float,
         stop_loss_roe: float,
         leverage: int,
+        verification_attempts: int = 5,
+        verification_delay: float = 0.5,
     ) -> None:
+        if verification_attempts < 1 or verification_delay < 0:
+            raise ValueError("invalid protection verification policy")
         self.adapter = adapter
         self.take_profit_roe = take_profit_roe
         self.stop_loss_roe = stop_loss_roe
         self.leverage = leverage
+        self.verification_attempts = verification_attempts
+        self.verification_delay = verification_delay
 
     async def reconcile_all(self, symbols: Sequence[str]) -> list[ProtectionReport]:
         positions = await self.adapter.fetch_positions()
@@ -159,15 +166,25 @@ class ProtectionReconciler:
         # Never cancel an old order until the exchange snapshot proves that the
         # complete desired pair exists. A half-created pair therefore leaves the
         # prior protection intact for the next reconciliation pass.
-        verified = list(await self.adapter.fetch_open_orders(symbol))
+        verified: list[dict[str, Any]] = []
         verified_pair: dict[str, dict[str, Any]] = {}
-        for spec in desired:
-            match = next((order for order in verified if _matches(order, spec)), None)
-            if match is None:
-                raise ProtectionError(
-                    f"{symbol} is not verifiably protected by both TP and SL"
+        for attempt in range(self.verification_attempts):
+            verified = list(await self.adapter.fetch_open_orders(symbol))
+            verified_pair = {}
+            for spec in desired:
+                match = next(
+                    (order for order in verified if _matches(order, spec)), None
                 )
-            verified_pair[spec.kind] = match
+                if match is not None:
+                    verified_pair[spec.kind] = match
+            if len(verified_pair) == len(desired):
+                break
+            if attempt + 1 < self.verification_attempts and self.verification_delay:
+                await asyncio.sleep(self.verification_delay)
+        if len(verified_pair) != len(desired):
+            raise ProtectionError(
+                f"{symbol} is not verifiably protected by both TP and SL"
+            )
 
         keep_ids = {str(order.get("id")) for order in verified_pair.values()}
         stale_ids = [
@@ -254,7 +271,10 @@ def _spec(
 
 def _kind(order: dict[str, Any]) -> str | None:
     info = order.get("info", {})
-    order_type = str(info.get("orderType") or order.get("type") or "").lower()
+    payload = _exchange_order_payload(order)
+    order_type = str(
+        payload.get("orderType") or info.get("orderType") or order.get("type") or ""
+    ).lower()
     if "take profit" in order_type or order.get("takeProfitPrice") is not None:
         return "take_profit"
     if "stop" in order_type or order.get("stopLossPrice") is not None:
@@ -263,25 +283,45 @@ def _kind(order: dict[str, Any]) -> str | None:
 
 
 def _trigger(order: dict[str, Any]) -> float:
+    payload = _exchange_order_payload(order)
     return float(
         order.get("triggerPrice")
         or order.get("stopLossPrice")
         or order.get("takeProfitPrice")
         or order.get("info", {}).get("triggerPx")
+        or payload.get("triggerPx")
         or 0
     )
 
 
 def _matches(order: dict[str, Any], spec: ProtectionSpec) -> bool:
+    payload = _exchange_order_payload(order)
     amount = float(order.get("amount") or order.get("remaining") or 0)
+    reduce_only = order.get("reduceOnly")
+    if reduce_only is None:
+        reduce_only = payload.get("reduceOnly", True)
+    client_order_id = str(
+        order.get("clientOrderId") or payload.get("cloid") or ""
+    ).lower()
+    trigger_matches = client_order_id == spec.cloid.lower() or math.isclose(
+        _trigger(order), spec.trigger_price, rel_tol=5e-5, abs_tol=1e-10
+    )
     return (
         _kind(order) == spec.kind
         and math.isclose(amount, spec.amount, rel_tol=1e-8, abs_tol=1e-10)
         # HyperLiquid rounds trigger prices to the market's significant-digit
-        # precision. Accept that exchange-normalized value when verifying the
-        # pair, while still rejecting a materially different protection level.
-        and math.isclose(
-            _trigger(order), spec.trigger_price, rel_tol=5e-5, abs_tol=1e-10
-        )
-        and bool(order.get("reduceOnly", order.get("info", {}).get("reduceOnly", True)))
+        # precision. The deterministic cloid is authoritative when present;
+        # otherwise accept a narrowly exchange-normalized trigger value.
+        and trigger_matches
+        and bool(reduce_only)
     )
+
+
+def _exchange_order_payload(order: dict[str, Any]) -> dict[str, Any]:
+    """Return native order fields from both CCXT response shapes."""
+
+    info = order.get("info", {})
+    if not isinstance(info, dict):
+        return {}
+    nested = info.get("order")
+    return nested if isinstance(nested, dict) else info

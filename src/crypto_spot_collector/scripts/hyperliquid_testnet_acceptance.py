@@ -1,47 +1,58 @@
-"""Run a destructive-but-contained HyperLiquid testnet acceptance scenario.
+"""Run the production SAR runtime path against HyperLiquid testnet.
 
-The scenario opens one small position on a symbol that was flat at startup,
-verifies durable order idempotency and exchange-truth TP/SL reconciliation,
-forces a WebSocket reconnect, monitors the protected position, then proves a
-long -> flat -> short -> flat transition. It never selects mainnet and cleans
-up only the symbol it selected.
+This is intentionally destructive for one initially-flat testnet symbol.  It
+uses controlled closed candles to exercise the same ``buy_perp`` strategy,
+durable executor, protection reconciler, trailing manager and runtime
+supervisor used by the deployed process.  It can never select mainnet.
 """
 
 from __future__ import annotations
 
 import argparse
 import asyncio
+import importlib
 import json
+import math
 import os
+import sqlite3
+import sys
 import tempfile
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Awaitable, Callable
+from types import ModuleType
+from typing import Any
 
+import pandas as pd
 from dotenv import load_dotenv
 from loguru import logger
 
 from crypto_spot_collector.exchange.hyperliquid import HyperLiquidExchange
-from crypto_spot_collector.trading.config import TradingConfig
-from crypto_spot_collector.trading.order_state import (
-    IdempotentOrderExecutor,
-    OrderIntent,
-    OrderStatus,
-    SQLiteOrderIntentStore,
-    create_intent,
-)
-from crypto_spot_collector.trading.protection import ProtectionReconciler
+from crypto_spot_collector.trading.config import Network, SignalMode, TradingConfig
+from crypto_spot_collector.trading.order_state import create_intent
+from crypto_spot_collector.trading.runtime import RuntimeSupervisor
 
+APP_MODULE = "crypto_spot_collector.apps.buy_perp"
 SYMBOL_CANDIDATES = (
-    "BTC/USDC:USDC",
+    "ARB/USDC:USDC",
     "SOL/USDC:USDC",
+    "ETH/USDC:USDC",
+    "BTC/USDC:USDC",
     "HYPE/USDC:USDC",
-    "AVAX/USDC:USDC",
 )
+TIMEFRAME = "1m"
 LEVERAGE = 3
-TAKE_PROFIT_ROE = 0.15
-STOP_LOSS_ROE = 0.03
+ORDER_NOTIONAL_USDC = 12.5
+
+
+class _SilentNotifier:
+    """Keep acceptance evidence local without sending account data externally."""
+
+    async def send_notification_async(self, **_kwargs: Any) -> bool:
+        return True
+
+    async def send_notification_embed_with_file(self, **_kwargs: Any) -> bool:
+        return True
 
 
 def _utc_now() -> str:
@@ -63,14 +74,9 @@ def _active_position(
 
 
 def _is_protection(order: dict[str, Any]) -> bool:
-    order_type = str(
-        order.get("info", {}).get("orderType") or order.get("type") or ""
-    ).lower()
+    info = order.get("info", {}) or {}
+    order_type = str(info.get("orderType") or order.get("type") or "").lower()
     return "take profit" in order_type or "stop" in order_type
-
-
-def _protection_count(orders: list[dict[str, Any]]) -> int:
-    return sum(1 for order in orders if _is_protection(order))
 
 
 async def _wait_for_position(
@@ -87,342 +93,677 @@ async def _wait_for_position(
             return None
         if position is not None and position.get("side") == expected_side:
             return position
-        await asyncio.sleep(1)
+        await asyncio.sleep(0.5)
     raise TimeoutError(f"position did not become {expected_side or 'flat'}: {symbol}")
 
 
-async def _wait_until(
-    predicate: Callable[[], Awaitable[bool]], *, timeout: float = 30.0
-) -> None:
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        if await predicate():
-            return
-        await asyncio.sleep(0.25)
-    raise TimeoutError("acceptance condition was not reached")
+async def _select_flat_symbol(
+    wallet: str, private_key: str
+) -> tuple[str, list[dict[str, Any]]]:
+    config = TradingConfig(
+        symbols=SYMBOL_CANDIDATES,
+        timeframe=TIMEFRAME,
+        amount_usdc=ORDER_NOTIONAL_USDC,
+        leverage=LEVERAGE,
+        take_profit_roe=15.0,
+        stop_loss_roe=3.0,
+        trailing_interval_minutes=1,
+        trailing_activation_roe=0.01,
+        sar_consecutive_count=1,
+        sar_close_consecutive_count=1,
+        price_change_threshold_percent=999.0,
+        max_order_notional_usdc=25.0,
+        max_symbol_notional_usdc=25.0,
+        max_total_notional_usdc=100.0,
+        max_positions=len(SYMBOL_CANDIDATES),
+        max_leverage=LEVERAGE,
+        min_free_collateral_usdc=0.0,
+        network=Network.TESTNET,
+    )
+    exchange = HyperLiquidExchange(
+        mainWalletAddress=wallet,
+        apiWalletAddress=wallet,
+        privateKey=private_key,
+        trading_config=config,
+    )
+    try:
+        positions = list(await exchange.fetch_positions())
+        active = [
+            position
+            for position in positions
+            if abs(float(position.get("contracts") or 0)) > 0
+        ]
+        open_orders = list(await exchange.fetch_open_orders(None))
+        if active or open_orders:
+            raise RuntimeError(
+                "testnet account must be globally flat with no open orders before "
+                "production-path acceptance"
+            )
+        symbol = next(
+            (
+                candidate
+                for candidate in SYMBOL_CANDIDATES
+                if _active_position(positions, candidate) is None
+            ),
+            None,
+        )
+        if symbol is None:
+            raise RuntimeError("no configured acceptance symbol is flat")
+        return symbol, active
+    finally:
+        await exchange.close()
 
 
-async def _create_and_execute(
-    executor: IdempotentOrderExecutor,
+def _write_runtime_files(
+    directory: Path,
+    *,
+    wallet: str,
+    private_key: str,
+    symbol: str,
+) -> tuple[Path, Path, Path]:
+    secrets_path = directory / "testnet-secrets.json"
+    settings_path = directory / "testnet-settings.json"
+    state_path = directory / "state"
+    secrets_path.write_text(
+        json.dumps(
+            {
+                "discord": {
+                    "discordWebhookUrlPerpetual": "disabled://testnet-acceptance"
+                },
+                "hyperliquid": {
+                    "network": "testnet",
+                    "mainWalletAddress": wallet,
+                    "apiWalletAddress": wallet,
+                    "privatekey": private_key,
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    settings_path.write_text(
+        json.dumps(
+            {
+                "settings": {
+                    "network": "testnet",
+                    "sandbox_mode": True,
+                    "allow_mainnet": False,
+                    "perpetual": {
+                        "symbols": [symbol],
+                        "signal_mode": "sar_only",
+                        "canary_mode": True,
+                        "entries_enabled": True,
+                        "entry_kill_switch_file": "ENTRY_KILL_SWITCH",
+                        "timeframe": TIMEFRAME,
+                        "leverage": LEVERAGE,
+                        "margin_mode": "cross",
+                        "take_profit_rate": 15.0,
+                        "stop_loss_rate": 3.0,
+                        "amountByUSDC": ORDER_NOTIONAL_USDC,
+                        "consecutivePositiveCount": 1,
+                        "sar_close_consecutive_count": 1,
+                        "price_change_threshold_percent": 999.0,
+                        "trailing_stop_interval_minutes": 1,
+                        "trailing_stop_activation_pnl_percent": 0.01,
+                        "risk": {
+                            "max_order_notional_usdc": 25.0,
+                            "max_symbol_notional_usdc": 25.0,
+                            "max_total_notional_usdc": 25.0,
+                            "max_positions": 1,
+                            "max_leverage": LEVERAGE,
+                            "min_free_collateral_usdc": 0.0,
+                        },
+                    },
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    return secrets_path, settings_path, state_path
+
+
+def _load_production_app(
+    secrets_path: Path, settings_path: Path, state_path: Path
+) -> ModuleType:
+    os.environ["HYPERLIQUID_SECRETS_FILE"] = str(secrets_path)
+    os.environ["HYPERLIQUID_SETTINGS_FILE"] = str(settings_path)
+    os.environ["HYPERLIQUID_STATE_DIR"] = str(state_path)
+    os.environ["HYPERLIQUID_DEPLOYMENT_NETWORK"] = "testnet"
+    os.environ.pop("HYPERLIQUID_MAINNET_CONFIRMATION", None)
+    sys.modules.pop(APP_MODULE, None)
+    app = importlib.import_module(APP_MODULE)
+    if (
+        not app.trading_config.testnet
+        or app.trading_config.network is not Network.TESTNET
+    ):
+        raise RuntimeError("acceptance runtime did not select testnet")
+    if app.trading_config.signal_mode is not SignalMode.SAR_ONLY:
+        raise RuntimeError("acceptance runtime did not select SAR-only strategy")
+    setattr(app, "notificator", _SilentNotifier())
+    return app
+
+
+def _controlled_frame(
+    end: datetime,
+    *,
+    direction: str,
+    reference_price: float,
+    stale: bool = False,
+) -> pd.DataFrame:
+    if direction not in {"long", "short"}:
+        raise ValueError("controlled direction must be long or short")
+    timestamps = [end - timedelta(minutes=2), end - timedelta(minutes=1)]
+    if direction == "long":
+        sar_up = [reference_price * 0.99 if stale else math.nan, reference_price * 0.99]
+        sar_down = [math.nan if stale else reference_price * 1.01, math.nan]
+    else:
+        sar_up = [math.nan if stale else reference_price * 0.99, math.nan]
+        sar_down = [
+            reference_price * 1.01 if stale else math.nan,
+            reference_price * 1.01,
+        ]
+    return pd.DataFrame(
+        {
+            "timestamp": timestamps,
+            "open": [reference_price, reference_price],
+            "high": [reference_price * 1.001, reference_price * 1.001],
+            "low": [reference_price * 0.999, reference_price * 0.999],
+            "close": [reference_price, reference_price],
+            "volume": [1.0, 1.0],
+            "sar_up": sar_up,
+            "sar_down": sar_down,
+        }
+    )
+
+
+async def _run_signal(
+    app: ModuleType,
     *,
     symbol: str,
-    side: str,
-    amount: float,
-    reduce_only: bool,
-    sequence: int,
-) -> tuple[OrderIntent, OrderIntent]:
-    requested = create_intent(
-        strategy="hyperliquid-testnet-acceptance",
-        symbol=symbol,
-        timeframe="acceptance",
-        candle_open_ms=sequence,
-        side=side,
-        amount=amount,
-        reduce_only=reduce_only,
+    end: datetime,
+    direction: str,
+    stale: bool = False,
+) -> None:
+    price = await app.hyperliquid_exchange.fetch_last_price(symbol)
+    frame = _controlled_frame(
+        end,
+        direction=direction,
+        reference_price=price,
+        stale=stale,
     )
-    first = await executor.execute(requested)
-    second = await executor.execute(requested)
-    if first.status is not OrderStatus.FILLED:
-        raise RuntimeError(f"testnet order did not fill: {first.status.value}")
-    if second.intent_id != first.intent_id or second.order_id != first.order_id:
-        raise RuntimeError("duplicate intent did not resolve to the original order")
-    return first, second
+    await app.check_signal(
+        startDate=end - timedelta(days=1),
+        endDate=end,
+        symbol=symbol,
+        timeframe=TIMEFRAME,
+        amountByUSDC=ORDER_NOTIONAL_USDC,
+        controlled_dataframe=frame,
+    )
 
 
-async def _close_selected_symbol(
-    exchange: HyperLiquidExchange,
-    executor: IdempotentOrderExecutor,
+def _intent_summary(database_path: Path) -> dict[str, Any]:
+    with sqlite3.connect(database_path) as connection:
+        rows = connection.execute(
+            "SELECT strategy, reduce_only, status FROM order_intents ORDER BY updated_at"
+        ).fetchall()
+    return {
+        "total": len(rows),
+        "entries": sum(1 for _, reduce_only, _ in rows if not reduce_only),
+        "closes": sum(1 for _, reduce_only, _ in rows if reduce_only),
+        "filled": sum(1 for _, _, status in rows if status == "filled"),
+        "unsettled": sum(
+            1
+            for _, _, status in rows
+            if status not in {"filled", "cancelled", "rejected"}
+        ),
+        "strategies": sorted({str(strategy) for strategy, _, _ in rows}),
+    }
+
+
+async def _graceful_close(app: ModuleType) -> None:
+    supervisor = RuntimeSupervisor(
+        resources=[app.runtime_state, app.hyperliquid_exchange],
+        on_shutdown_requested=app.order_executor.stop_accepting,
+    )
+
+    async def wait_for_shutdown() -> None:
+        await supervisor.shutdown_event.wait()
+
+    running = asyncio.create_task(supervisor.run([wait_for_shutdown()]))
+    await asyncio.sleep(0)
+    supervisor.request_shutdown()
+    await running
+
+
+async def _restart(
+    app: ModuleType,
+    secrets_path: Path,
+    settings_path: Path,
+    state_path: Path,
+) -> ModuleType:
+    await _graceful_close(app)
+    restarted = _load_production_app(secrets_path, settings_path, state_path)
+    recovered = await restarted.order_executor.recover_unsettled()
+    if any(
+        intent.status.value not in {"filled", "cancelled", "rejected"}
+        for intent in recovered
+    ):
+        raise RuntimeError("restart left an unresolved order intent")
+    await restarted.initialize_trailing_manager()
+    restarted.runtime_state.health.write("running")
+    return restarted
+
+
+async def _verify_trailing_restart(
+    app: ModuleType,
+    *,
     symbol: str,
-    sequence: int,
-) -> OrderIntent | None:
-    position = _active_position(list(await exchange.fetch_positions()), symbol)
+    trailing: dict[str, Any],
+    secrets_path: Path,
+    settings_path: Path,
+    state_path: Path,
+) -> ModuleType:
+    stop_before_restart = float(trailing["stop_after"])
+    trailing_side = str(trailing["side"])
+    restarted = await _restart(app, secrets_path, settings_path, state_path)
+    await restarted.protection_reconciler.reconcile_symbol(symbol)
+    recovered = await restarted.hyperliquid_exchange.fetch_tp_sl_info(symbol)
+    if recovered is None:
+        raise RuntimeError("protection missing after trailing restart")
+    recovered_stop = float(recovered.stop_loss_trigger_price)
+    non_retreat = (
+        trailing_side == "long" and recovered_stop >= stop_before_restart
+    ) or (trailing_side == "short" and recovered_stop <= stop_before_restart)
+    if not non_retreat:
+        raise RuntimeError("trailing stop retreated after restart")
+    return restarted
+
+
+async def _force_websocket_reconnect(app: ModuleType, symbol: str) -> dict[str, Any]:
+    client = app.hyperliquid_exchange.ws_client
+    coin = symbol.split("/")[0]
+    messages = 0
+
+    def on_trade(_message: dict[str, Any]) -> None:
+        nonlocal messages
+        messages += 1
+
+    await client.connect()
+    await client.subscribe_trade(coin, on_trade)
+    listener = asyncio.create_task(client.listen())
+    try:
+        await asyncio.sleep(1)
+        if client.ws is None:
+            raise RuntimeError("WebSocket missing before forced disconnect")
+        started = time.monotonic()
+        await client.ws.close()
+        deadline = started + 30
+        while time.monotonic() < deadline and client.reconnect_count < 1:
+            await asyncio.sleep(0.25)
+        if client.reconnect_count < 1:
+            raise TimeoutError("WebSocket did not reconnect")
+        return {
+            "forced_reconnect_seconds": round(time.monotonic() - started, 3),
+            "reconnect_count": client.reconnect_count,
+            "trade_messages": messages,
+        }
+    finally:
+        listener.cancel()
+        await asyncio.gather(listener, return_exceptions=True)
+
+
+async def _exercise_trailing(
+    app: ModuleType,
+    symbol: str,
+    *,
+    timeout: float,
+    sample_seconds: float,
+) -> dict[str, Any]:
+    started = time.monotonic()
+    previous_sample = started
+    samples = 0
+    unprotected_seconds = 0.0
+    while time.monotonic() - started < timeout:
+        position = _active_position(
+            list(await app.hyperliquid_exchange.fetch_positions()), symbol
+        )
+        if position is None:
+            raise RuntimeError("position disappeared while testing trailing protection")
+        orders = list(await app.hyperliquid_exchange.fetch_open_orders(symbol))
+        now = time.monotonic()
+        if sum(1 for order in orders if _is_protection(order)) < 2:
+            unprotected_seconds += now - previous_sample
+            await app.protection_reconciler.reconcile_symbol(symbol)
+        samples += 1
+        previous_sample = now
+        side = str(position.get("side"))
+        entry = float(position.get("entryPrice") or 0)
+        last = await app.hyperliquid_exchange.fetch_last_price(symbol)
+        favorable = (side == "long" and last > entry) or (
+            side == "short" and last < entry
+        )
+        favorable_distance = abs(last - entry) / entry
+        if favorable and favorable_distance >= 0.0002:
+            manager_position = app.trailing_manager.get_position(symbol)
+            if manager_position is None:
+                raise RuntimeError("production trailing manager did not adopt position")
+            initial_stop = float(manager_position.current_stoploss_price)
+            app.trailing_manager.activate_trailing(symbol, entry)
+            desired_stop = float(manager_position.current_stoploss_price)
+            if side == "long" and not desired_stop >= entry:
+                await asyncio.sleep(sample_seconds)
+                continue
+            if side == "short" and not desired_stop <= entry:
+                await asyncio.sleep(sample_seconds)
+                continue
+            await app.protection_reconciler.reconcile_symbol(
+                symbol, trailing_stop=desired_stop
+            )
+            actual = await app.hyperliquid_exchange.fetch_tp_sl_info(symbol)
+            if actual is None:
+                # Hyperliquid can briefly expose only one side after the new SL
+                # is verified and the old SL is cancelled. Retry the full
+                # reconciliation instead of treating that short view as truth.
+                await asyncio.sleep(1)
+                await app.protection_reconciler.reconcile_symbol(
+                    symbol, trailing_stop=desired_stop
+                )
+                actual = await app.hyperliquid_exchange.fetch_tp_sl_info(symbol)
+            if actual is None:
+                raise RuntimeError("trailing update did not converge to a TP/SL pair")
+            actual_stop = float(actual.stop_loss_trigger_price)
+            breakeven_reached = (side == "long" and actual_stop >= entry) or (
+                side == "short" and actual_stop <= entry
+            )
+            moved_to_profit = (side == "long" and actual_stop > initial_stop) or (
+                side == "short" and actual_stop < initial_stop
+            )
+            if not moved_to_profit:
+                await asyncio.sleep(sample_seconds)
+                continue
+            return {
+                "activated": True,
+                "side": side,
+                "samples": samples,
+                "wait_seconds": round(time.monotonic() - started, 2),
+                "unprotected_seconds": round(unprotected_seconds, 3),
+                "breakeven_reached": breakeven_reached,
+                "profit_direction_update": True,
+                "stop_before": initial_stop,
+                "stop_after": actual_stop,
+            }
+        print(
+            json.dumps(
+                {
+                    "event": "await_favorable_testnet_price",
+                    "side": side,
+                    "elapsed_seconds": round(time.monotonic() - started, 1),
+                    "samples": samples,
+                }
+            ),
+            flush=True,
+        )
+        await asyncio.sleep(sample_seconds)
+    return {
+        "activated": False,
+        "samples": samples,
+        "wait_seconds": round(time.monotonic() - started, 2),
+        "unprotected_seconds": round(unprotected_seconds, 3),
+    }
+
+
+async def _manual_close(app: ModuleType, symbol: str) -> None:
+    position = _active_position(
+        list(await app.hyperliquid_exchange.fetch_positions()), symbol
+    )
     if position is None:
-        return None
+        return
     side = "sell" if position.get("side") == "long" else "buy"
     amount = abs(float(position.get("contracts") or 0))
-    result, _ = await _create_and_execute(
-        executor,
+    prepared = await app.hyperliquid_exchange.prepare_market_order(symbol, amount)
+    manual_intent = create_intent(
+        strategy="testnet-external-manual-close-v1",
         symbol=symbol,
         side=side,
-        amount=amount,
+        amount=prepared.amount,
+        timeframe="manual",
+        candle_open_ms=int(time.time() * 1000),
         reduce_only=True,
-        sequence=sequence,
     )
-    await _wait_for_position(exchange, symbol, None)
-    return result
+    await app.hyperliquid_exchange.submit_market_order(manual_intent)
+    await _wait_for_position(app.hyperliquid_exchange, symbol, None)
+    await app.protection_reconciler.reconcile_symbol(symbol)
 
 
-async def run(monitor_seconds: int, sample_seconds: int) -> dict[str, Any]:
+async def run(
+    monitor_seconds: int, sample_seconds: float, initial_side: str
+) -> dict[str, Any]:
     load_dotenv(Path.cwd() / ".env")
     if os.getenv("HYPERLIQUID_TESTNET", "").lower() not in {"1", "true", "yes"}:
         raise RuntimeError("HYPERLIQUID_TESTNET=true is required")
     wallet = os.environ["HYPERLIQUID_WALLET_ADDRESS"]
     private_key = os.environ["HYPERLIQUID_PRIVATE_KEY"]
-    started_at = _utc_now()
-    started_sequence = int(time.time() * 1000)
+    started_monotonic = time.monotonic()
     report: dict[str, Any] = {
         "network": "testnet",
-        "started_at": started_at,
-        "monitor_requested_seconds": monitor_seconds,
-        "sample_seconds": sample_seconds,
+        "started_at": _utc_now(),
+        "mainnet_operations": 0,
+        "unresolved_errors": [],
     }
-    trading_config = TradingConfig(
-        symbols=SYMBOL_CANDIDATES,
-        timeframe="1m",
-        amount_usdc=12.5,
-        leverage=LEVERAGE,
-        take_profit_roe=TAKE_PROFIT_ROE,
-        stop_loss_roe=STOP_LOSS_ROE,
-        trailing_interval_minutes=1,
-        trailing_activation_roe=1.0,
-        sar_consecutive_count=1,
-        sar_close_consecutive_count=1,
-        price_change_threshold_percent=1.0,
-        max_order_notional_usdc=25.0,
-        max_symbol_notional_usdc=25.0,
-        max_total_notional_usdc=25.0,
-        max_positions=1,
-        max_leverage=LEVERAGE,
-        min_free_collateral_usdc=0.0,
-    )
+    opposite_side = "short" if initial_side == "long" else "long"
+    symbol, initial_positions = await _select_flat_symbol(wallet, private_key)
+    report["symbol"] = symbol
+    report["preexisting_position_count"] = len(initial_positions)
 
-    exchange = HyperLiquidExchange(
-        mainWalletAddress=wallet,
-        apiWalletAddress=wallet,
-        privateKey=private_key,
-        trading_config=trading_config,
-    )
-    reconciler = ProtectionReconciler(
-        exchange,
-        take_profit_roe=TAKE_PROFIT_ROE,
-        stop_loss_roe=STOP_LOSS_ROE,
-        leverage=LEVERAGE,
-    )
-    listener: asyncio.Task[None] | None = None
-
-    with tempfile.TemporaryDirectory(prefix="hyperliquid-acceptance-") as state_dir:
-        store = SQLiteOrderIntentStore(Path(state_dir) / "order-intents.sqlite")
-        executor = IdempotentOrderExecutor(exchange, store)
-        selected_symbol: str | None = None
+    with tempfile.TemporaryDirectory(
+        prefix="hyperliquid-production-e2e-", ignore_cleanup_errors=True
+    ) as raw_dir:
+        directory = Path(raw_dir)
+        secrets_path, settings_path, state_path = _write_runtime_files(
+            directory,
+            wallet=wallet,
+            private_key=private_key,
+            symbol=symbol,
+        )
+        app: ModuleType | None = None
+        sequence_end = datetime.now(timezone.utc).replace(second=0, microsecond=0)
         try:
-            positions = list(await exchange.fetch_positions())
-            initial_positions = {
-                str(position.get("symbol")): {
-                    "side": position.get("side"),
-                    "contracts": float(position.get("contracts") or 0),
-                    "leverage": float(position.get("leverage") or 0),
-                }
-                for position in positions
-                if abs(float(position.get("contracts") or 0)) > 0
-            }
-            report["preexisting_positions"] = initial_positions
-            selected_symbol = next(
-                (
-                    symbol
-                    for symbol in SYMBOL_CANDIDATES
-                    if _active_position(positions, symbol) is None
-                ),
-                None,
-            )
-            if selected_symbol is None:
-                raise RuntimeError("no configured acceptance symbol is flat")
-            report["symbol"] = selected_symbol
+            app = _load_production_app(secrets_path, settings_path, state_path)
+            await app.protection_reconciler.reconcile_symbol(symbol)
+            app.runtime_state.health.write("running")
 
-            await exchange.exchange_private.load_markets()
-            await exchange.exchange_private.set_leverage(
-                LEVERAGE, selected_symbol, {"marginMode": "cross"}
+            await _run_signal(
+                app,
+                symbol=symbol,
+                end=sequence_end,
+                direction=initial_side,
+                stale=True,
             )
-            # Remove only stale protections on the selected, initially-flat symbol.
-            await reconciler.reconcile_symbol(selected_symbol)
-            price = await exchange.fetch_last_price(selected_symbol)
-            market = exchange.exchange_private.market(selected_symbol)
-            minimum_cost = float(
-                (market.get("limits", {}).get("cost", {}) or {}).get("min") or 10
-            )
-            notional = max(12.5, minimum_cost * 1.25)
-            raw_amount = notional / price
-            amount = float(
-                exchange.exchange_private.amount_to_precision(
-                    selected_symbol, raw_amount
+            if (
+                _active_position(
+                    list(await app.hyperliquid_exchange.fetch_positions()), symbol
                 )
+                is not None
+            ):
+                raise RuntimeError("stale SAR interval unexpectedly opened a position")
+            report["stale_sar_rejected"] = True
+
+            sequence_end += timedelta(minutes=1)
+            await _run_signal(
+                app, symbol=symbol, end=sequence_end, direction=initial_side
             )
-            if amount <= 0 or amount * price < minimum_cost:
+            first_position = await _wait_for_position(
+                app.hyperliquid_exchange, symbol, initial_side
+            )
+            assert first_position is not None
+            first_orders = list(
+                await app.hyperliquid_exchange.fetch_open_orders(symbol)
+            )
+            if sum(1 for order in first_orders if _is_protection(order)) != 2:
                 raise RuntimeError(
-                    "could not construct an order above the market minimum"
+                    f"{initial_side} entry was not protected by exactly TP and SL"
                 )
-            report["test_notional_usdc"] = round(amount * price, 4)
-
-            long_entry, long_duplicate = await _create_and_execute(
-                executor,
-                symbol=selected_symbol,
-                side="buy",
-                amount=amount,
-                reduce_only=False,
-                sequence=started_sequence,
+            intent_count = _intent_summary(app.runtime_state.database_path)["total"]
+            await _run_signal(
+                app, symbol=symbol, end=sequence_end, direction=initial_side
             )
-            long_position = await _wait_for_position(exchange, selected_symbol, "long")
-            long_protection = await reconciler.reconcile_symbol(selected_symbol)
-            report["long_entry"] = {
-                "status": long_entry.status.value,
-                "duplicate_resolved_to_same_order": (
-                    long_duplicate.order_id == long_entry.order_id
-                ),
-                "position_contracts": float(long_position.get("contracts") or 0),
-                "protection_created": len(long_protection.created),
+            if (
+                _intent_summary(app.runtime_state.database_path)["total"]
+                != intent_count
+            ):
+                raise RuntimeError("duplicate candle created another intent")
+            report[f"{initial_side}_entry"] = {
+                "confirmed": True,
+                "contracts": abs(float(first_position.get("contracts") or 0)),
+                "protection_orders": 2,
+                "duplicate_candle_intents_added": 0,
             }
 
-            reconnect_callbacks = 0
-
-            async def on_reconnect() -> None:
-                nonlocal reconnect_callbacks
-                reconnect_callbacks += 1
-                await reconciler.reconcile_symbol(selected_symbol)
-
-            exchange.ws_client.set_reconnect_callback(on_reconnect)
-            trade_messages = 0
-
-            def on_trade(_: dict[str, Any]) -> None:
-                nonlocal trade_messages
-                trade_messages += 1
-
-            coin = selected_symbol.split("/")[0]
-            await exchange.ws_client.connect()
-            await exchange.ws_client.subscribe_trade(coin, on_trade)
-            listener = asyncio.create_task(exchange.ws_client.listen())
-            await asyncio.sleep(2)
-            if exchange.ws_client.ws is None:
-                raise RuntimeError("WebSocket missing before forced disconnect")
-            reconnect_started = time.monotonic()
-            await exchange.ws_client.ws.close()
-
-            async def reconnected() -> bool:
-                return (
-                    exchange.ws_client.reconnect_count >= 1 and reconnect_callbacks >= 1
-                )
-
-            await _wait_until(reconnected, timeout=30)
-            report["websocket"] = {
-                "forced_reconnect_seconds": round(
-                    time.monotonic() - reconnect_started, 3
-                ),
-                "reconnect_count": exchange.ws_client.reconnect_count,
-                "reconcile_callbacks": reconnect_callbacks,
-            }
-
-            samples = 0
-            unprotected_seconds = 0.0
-            monitor_started = time.monotonic()
-            previous_sample = monitor_started
-            while time.monotonic() - monitor_started < monitor_seconds:
-                positions = list(await exchange.fetch_positions())
-                position = _active_position(positions, selected_symbol)
-                orders = list(await exchange.fetch_open_orders(selected_symbol))
-                now = time.monotonic()
-                if position is None:
-                    raise RuntimeError("monitored long position disappeared")
-                if _protection_count(orders) < 2:
-                    unprotected_seconds += now - previous_sample
-                    await reconciler.reconcile_symbol(selected_symbol)
-                samples += 1
-                previous_sample = now
-                elapsed = round(now - monitor_started, 1)
-                print(
-                    json.dumps(
-                        {
-                            "event": "monitor",
-                            "elapsed_seconds": elapsed,
-                            "samples": samples,
-                        }
+            app = await _restart(app, secrets_path, settings_path, state_path)
+            await _run_signal(
+                app, symbol=symbol, end=sequence_end, direction=initial_side
+            )
+            if (
+                _intent_summary(app.runtime_state.database_path)["total"]
+                != intent_count
+            ):
+                raise RuntimeError("restart replay created another intent")
+            report["restart_recovery"] = {
+                "durable_intent_replay_added": 0,
+                "position_restored": app.trailing_manager.get_position(symbol)
+                is not None,
+                "protection_orders": sum(
+                    1
+                    for order in await app.hyperliquid_exchange.fetch_open_orders(
+                        symbol
                     )
-                )
-                remaining = monitor_seconds - (now - monitor_started)
-                if remaining > 0:
-                    await asyncio.sleep(min(sample_seconds, remaining))
-            report["monitor"] = {
-                "actual_seconds": round(time.monotonic() - monitor_started, 2),
-                "samples": samples,
-                "unprotected_seconds": round(unprotected_seconds, 3),
-                "trade_messages": trade_messages,
-            }
-            report["websocket"][
-                "reconnect_count_final"
-            ] = exchange.ws_client.reconnect_count
-            report["websocket"]["reconcile_callbacks_final"] = reconnect_callbacks
-
-            long_close = await _close_selected_symbol(
-                exchange, executor, selected_symbol, started_sequence + 1
-            )
-            flat_report = await reconciler.reconcile_symbol(selected_symbol)
-            report["long_close"] = {
-                "status": long_close.status.value if long_close else "already_flat",
-                "orphan_orders_cancelled": flat_report.orphan_count,
-            }
-
-            short_entry, short_duplicate = await _create_and_execute(
-                executor,
-                symbol=selected_symbol,
-                side="sell",
-                amount=amount,
-                reduce_only=False,
-                sequence=started_sequence + 2,
-            )
-            short_position = await _wait_for_position(
-                exchange, selected_symbol, "short"
-            )
-            short_protection = await reconciler.reconcile_symbol(selected_symbol)
-            report["short_entry"] = {
-                "status": short_entry.status.value,
-                "duplicate_resolved_to_same_order": (
-                    short_duplicate.order_id == short_entry.order_id
+                    if _is_protection(order)
                 ),
-                "position_contracts": float(short_position.get("contracts") or 0),
-                "protection_created": len(short_protection.created),
             }
-            await asyncio.sleep(5)
-            short_close = await _close_selected_symbol(
-                exchange, executor, selected_symbol, started_sequence + 3
+            report["websocket"] = await _force_websocket_reconnect(app, symbol)
+
+            first_budget = max(1, monitor_seconds // 2)
+            trailing = await _exercise_trailing(
+                app,
+                symbol,
+                timeout=first_budget,
+                sample_seconds=sample_seconds,
             )
-            final_reconcile = await reconciler.reconcile_symbol(selected_symbol)
-            final_orders = list(await exchange.fetch_open_orders(selected_symbol))
-            report["short_close"] = {
-                "status": short_close.status.value if short_close else "already_flat",
-                "orphan_orders_cancelled": final_reconcile.orphan_count,
+            if trailing.get("activated"):
+                app = await _verify_trailing_restart(
+                    app,
+                    symbol=symbol,
+                    trailing=trailing,
+                    secrets_path=secrets_path,
+                    settings_path=settings_path,
+                    state_path=state_path,
+                )
+                report["trailing_restart_non_retreat"] = True
+
+            sequence_end += timedelta(minutes=1)
+            await _run_signal(
+                app, symbol=symbol, end=sequence_end, direction=opposite_side
+            )
+            await _wait_for_position(app.hyperliquid_exchange, symbol, None)
+            report["opposite_sar_close"] = {
+                "reduce_only": True,
+                "flat_confirmed_before_reverse": True,
             }
+
+            sequence_end += timedelta(minutes=1)
+            await _run_signal(
+                app, symbol=symbol, end=sequence_end, direction=opposite_side
+            )
+            second_position = await _wait_for_position(
+                app.hyperliquid_exchange, symbol, opposite_side
+            )
+            assert second_position is not None
+            second_orders = list(
+                await app.hyperliquid_exchange.fetch_open_orders(symbol)
+            )
+            if sum(1 for order in second_orders if _is_protection(order)) != 2:
+                raise RuntimeError(
+                    f"{opposite_side} entry was not protected by exactly TP and SL"
+                )
+            report[f"{opposite_side}_entry"] = {
+                "confirmed": True,
+                "contracts": abs(float(second_position.get("contracts") or 0)),
+                "protection_orders": 2,
+            }
+
+            if not trailing.get("activated"):
+                trailing = await _exercise_trailing(
+                    app,
+                    symbol,
+                    timeout=max(1, monitor_seconds - first_budget),
+                    sample_seconds=sample_seconds,
+                )
+                if trailing.get("activated"):
+                    app = await _verify_trailing_restart(
+                        app,
+                        symbol=symbol,
+                        trailing=trailing,
+                        secrets_path=secrets_path,
+                        settings_path=settings_path,
+                        state_path=state_path,
+                    )
+                    report["trailing_restart_non_retreat"] = True
+            if not trailing.get("activated"):
+                raise RuntimeError(
+                    "testnet price never allowed a safe trailing activation"
+                )
+            report["trailing"] = trailing
+
+            await _manual_close(app, symbol)
+            report["manual_settlement_reconciled"] = True
+            final_positions = list(await app.hyperliquid_exchange.fetch_positions())
+            final_orders = list(await app.hyperliquid_exchange.fetch_open_orders(None))
+            active_final_positions = [
+                position
+                for position in final_positions
+                if abs(float(position.get("contracts") or 0)) > 0
+            ]
             report["final"] = {
-                "selected_symbol_flat": _active_position(
-                    list(await exchange.fetch_positions()), selected_symbol
-                )
-                is None,
-                "selected_symbol_open_orders": len(final_orders),
+                "account_active_positions": len(active_final_positions),
+                "account_open_orders": len(final_orders),
             }
+            report["intents"] = _intent_summary(app.runtime_state.database_path)
+            if report["intents"]["unsettled"]:
+                raise RuntimeError("durable order intents remain unsettled")
+            if active_final_positions or final_orders:
+                raise RuntimeError("acceptance cleanup did not leave the account clean")
+        except Exception as exc:
+            report["unresolved_errors"].append(type(exc).__name__)
+            raise
         finally:
-            if selected_symbol is not None:
+            if app is not None:
                 try:
-                    await _close_selected_symbol(
-                        exchange, executor, selected_symbol, started_sequence + 99
-                    )
-                    await reconciler.reconcile_symbol(selected_symbol)
+                    await _manual_close(app, symbol)
                 except Exception as cleanup_error:
                     report["cleanup_error"] = type(cleanup_error).__name__
-            if listener is not None:
-                listener.cancel()
-                await asyncio.gather(listener, return_exceptions=True)
-            await exchange.close()
+                try:
+                    await _graceful_close(app)
+                    report["graceful_shutdown"] = True
+                except Exception as shutdown_error:
+                    report["shutdown_error"] = type(shutdown_error).__name__
 
     report["ended_at"] = _utc_now()
+    report["runtime_seconds"] = round(time.monotonic() - started_monotonic, 2)
     return report
 
 
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--monitor-seconds", type=int, default=600)
-    parser.add_argument("--sample-seconds", type=int, default=10)
+    parser.add_argument("--sample-seconds", type=float, default=5.0)
+    parser.add_argument("--initial-side", choices=("long", "short"), default="long")
     args = parser.parse_args()
-    if args.monitor_seconds < 0 or args.sample_seconds <= 0:
+    if args.monitor_seconds <= 0 or args.sample_seconds <= 0:
         parser.error("durations must be positive")
     logger.remove()
     logger.add(lambda message: print(message, end=""), level="INFO")
-    result = asyncio.run(run(args.monitor_seconds, args.sample_seconds))
+    result = asyncio.run(
+        run(args.monitor_seconds, args.sample_seconds, args.initial_side)
+    )
     print("ACCEPTANCE_RESULT=" + json.dumps(result, sort_keys=True))
 
 

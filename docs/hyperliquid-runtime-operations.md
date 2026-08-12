@@ -53,7 +53,9 @@
   leverage and margin mode, then pass TP/SL reconciliation on both sides.
 - TP/SL prices express ROE percentages: price distance is
   `(configured_roe / 100) / actual_leverage`. Replacement protection is
-  created and verified before stale protection is cancelled.
+  created and verified before stale protection is cancelled. Verification
+  tolerates eventual-consistency snapshots and both CCXT condition-order
+  response shapes; a deterministic cloid identifies an exchange-rounded TP/SL.
 - If entry protection or account settings cannot be verified, new signals are
   inhibited and a deterministic reduce-only emergency close is attempted. A
   failure to prove that close is fatal and leaves the durable intent blocking
@@ -115,6 +117,9 @@ key or webhook value.
 Deployment, environment-separated secrets, persistent state, healthcheck,
 backup/restore and rollback procedures are documented in
 `docs/hyperliquid-deployment-runbook.md`.
+
+The production-path destructive testnet procedure and its latest evidence are
+documented in `docs/hyperliquid-testnet-acceptance-2026-08-13.md`.
 
 ## Dead man's switch decision
 

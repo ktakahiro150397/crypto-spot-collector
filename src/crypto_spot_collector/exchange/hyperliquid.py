@@ -64,6 +64,7 @@ class HyperLiquidExchange(IExchange):
         trading_config.validate()
         testnet = trading_config.testnet
         logger.info("Initializing HyperLiquid exchange client")
+        self.main_wallet_address = mainWalletAddress
         if privateKey and not privateKey.startswith("0x"):
             privateKey = "0x" + privateKey
         exchange_type = (
@@ -152,7 +153,31 @@ class HyperLiquidExchange(IExchange):
     async def fetch_free_collateral(self) -> float:
         """Return free USDC collateral for the entry risk gate."""
 
-        return await self.fetch_free_usdt_async()
+        raw_mode = await self.rest.call(
+            "fetch_account_abstraction",
+            lambda: self.exchange_public.public_post_info(
+                {
+                    "type": "userAbstraction",
+                    "user": self.main_wallet_address,
+                }
+            ),
+        )
+        mode = str(raw_mode).strip('"').lower()
+        if mode in {"unifiedaccount", "portfoliomargin"}:
+            # Hyperliquid exposes unified collateral in spotClearinghouseState;
+            # the legacy perps balance is intentionally zero in these modes.
+            balance = await self.rest.call(
+                "fetch_unified_collateral",
+                lambda: self.exchange_public.fetch_balance({"type": "spot"}),
+            )
+        elif mode in {"disabled", "default", "dexabstraction"}:
+            balance = await self.fetch_balance_async()
+        else:
+            raise RuntimeError("unsupported Hyperliquid account abstraction mode")
+        free = float(balance.get("free", {}).get("USDC") or 0)
+        if not math.isfinite(free) or free < 0:
+            raise RuntimeError("exchange returned invalid free USDC collateral")
+        return free
 
     async def fetch_price_async(self, symbol: str) -> dict[Any, Any]:
         logger.debug(f"Fetching price for {symbol} asynchronously")
@@ -471,7 +496,7 @@ class HyperLiquidExchange(IExchange):
         logger.debug(f"Fetching open orders for {symbol}")
         orders = await self.exchange_public.fetch_open_orders(symbol)
         logger.debug(f"Found {len(orders)} open orders for {symbol}")
-        return orders
+        return list(orders)
 
     async def fetch_canceled_orders_all_async(
         self, symbol: str
