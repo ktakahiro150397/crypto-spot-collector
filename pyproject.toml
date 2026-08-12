@@ -28,6 +28,7 @@ dependencies = [
 # Database and data management commands
 test-db = "crypto_spot_collector.scripts.test_db:test_database_connection"
 import-data = "crypto_spot_collector.scripts.import_historical_data:main"
+backtest = "crypto_spot_collector.backtesting.cli:main"
 
 [project.optional-dependencies]
 dev = [

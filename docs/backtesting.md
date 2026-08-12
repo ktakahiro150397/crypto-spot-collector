@@ -118,6 +118,32 @@ fully realized and comparable result. Reports contain:
 Identical validated input and configuration must produce byte-equivalent
 summary values and deterministic ledger/equity rows.
 
+## Running the backtest
+
+After `uv sync`, run the offline CLI with an explicit fee assumption:
+
+```bash
+uv run backtest \
+  --input historical_data/hyperliquid-eth-perp-1m.csv \
+  --symbol ETH/USDC:USDC \
+  --source-timeframe 1m \
+  --signal-timeframe 30m \
+  --start 2026-01-01T00:00:00Z \
+  --end 2026-07-01T00:00:00Z \
+  --leverage 3 \
+  --order-notional 12 \
+  --taker-fee-bps <current-taker-fee-bps> \
+  --slippage-bps 1 \
+  --output-dir backtest_results/eth-30m
+```
+
+The fee is required instead of silently embedding an exchange fee that can
+change. Standard CSV uses the required columns defined above. Raw Binance kline
+CSV can be read with `--csv-format binance_klines`, but the initial engine
+intentionally rejects non-Hyperliquid or non-perpetual identity. Successful
+execution writes `summary.json`, `trades.csv`, and `equity.csv` beneath the
+output directory.
+
 ## Required verification
 
 Automated tests must cover data identity and validation, correct OHLCV

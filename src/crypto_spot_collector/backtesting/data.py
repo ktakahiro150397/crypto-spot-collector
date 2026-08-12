@@ -129,6 +129,32 @@ def load_ohlcv_csv(
     return CandleSeries.from_frame(key, frame)
 
 
+def select_period(
+    series: CandleSeries,
+    *,
+    start: str | pd.Timestamp | None = None,
+    end: str | pd.Timestamp | None = None,
+) -> CandleSeries:
+    """Select an inclusive start and exclusive end from a validated series."""
+
+    start_timestamp = _utc_boundary(start, "start") if start is not None else None
+    end_timestamp = _utc_boundary(end, "end") if end is not None else None
+    if (
+        start_timestamp is not None
+        and end_timestamp is not None
+        and end_timestamp <= start_timestamp
+    ):
+        raise CandleDataError("period end must be later than period start")
+    selected = series.frame
+    if start_timestamp is not None:
+        selected = selected.loc[selected["timestamp"] >= start_timestamp]
+    if end_timestamp is not None:
+        selected = selected.loc[selected["timestamp"] < end_timestamp]
+    if selected.empty:
+        raise CandleDataError("selected period contains no candles")
+    return CandleSeries.from_frame(series.key, selected.reset_index(drop=True))
+
+
 def validate_ohlcv(
     frame: pd.DataFrame,
     timeframe: str,
@@ -171,7 +197,9 @@ def validate_ohlcv(
         raise CandleDataError("candle sequence contains a gap or wrong interval")
 
     for column in ("open", "high", "low", "close", "volume"):
-        normalized[column] = pd.to_numeric(normalized[column], errors="coerce")
+        normalized[column] = pd.to_numeric(normalized[column], errors="coerce").astype(
+            float
+        )
         if not normalized[column].map(math.isfinite).all():
             raise CandleDataError(f"{column} contains a non-finite value")
     if (normalized[["open", "high", "low", "close"]] <= 0).any().any():
@@ -273,3 +301,17 @@ def _timeframe_ms(timeframe: str) -> int:
         return int(timeframe_milliseconds(timeframe.lower()))
     except ValueError as exc:
         raise CandleDataError(str(exc)) from exc
+
+
+def _utc_boundary(value: str | pd.Timestamp, name: str) -> pd.Timestamp:
+    try:
+        timestamp = pd.Timestamp(value)
+    except (TypeError, ValueError) as exc:
+        raise CandleDataError(f"invalid {name} timestamp: {value!r}") from exc
+    if pd.isna(timestamp):
+        raise CandleDataError(f"invalid {name} timestamp: {value!r}")
+    if timestamp.tzinfo is None:
+        timestamp = timestamp.tz_localize("UTC")
+    else:
+        timestamp = timestamp.tz_convert("UTC")
+    return timestamp

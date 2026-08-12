@@ -50,6 +50,7 @@ from crypto_spot_collector.trading.runtime import RuntimeSupervisor
 from crypto_spot_collector.trading.strategy import (
     CandleGate,
     SQLiteSarStateStore,
+    evaluate_sar_signal,
     latest_closed_identity,
 )
 from crypto_spot_collector.utils.close_position_notification import (
@@ -855,7 +856,8 @@ async def check_signal(
         )
         return
 
-    current_sar_direction = sar_checker.get_current_sar_direction(df)
+    sar_decision = evaluate_sar_signal(df, sar_checker)
+    current_sar_direction = sar_decision.direction
     if current_sar_direction is None:
         logger.warning(f"{symbol}: Latest closed candle has ambiguous SAR direction")
         return
@@ -939,8 +941,8 @@ async def check_signal(
         return
 
     if trading_config.signal_mode is SignalMode.SAR_ONLY:
-        long_signal = sar_checker.check_long(df)
-        short_signal = sar_checker.check_short(df)
+        long_signal = sar_decision.long_signal
+        short_signal = sar_decision.short_signal
         long_reason = "SAR bullish transition" if long_signal else "No long signal"
         short_reason = "SAR bearish transition" if short_signal else "No short signal"
     else:

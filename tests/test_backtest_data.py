@@ -13,6 +13,7 @@ from crypto_spot_collector.backtesting.data import (
     MarketType,
     load_ohlcv_csv,
     resample_ohlcv,
+    select_period,
     validate_ohlcv,
 )
 
@@ -128,3 +129,28 @@ def test_binance_kline_loader_infers_microsecond_timestamp(tmp_path: Path) -> No
         pd.Timestamp("2026-01-01T00:01:00Z"),
     ]
     assert not series.funding_available
+
+
+def test_period_selection_uses_inclusive_start_and_exclusive_end() -> None:
+    key = CandleSeriesKey("hyperliquid", "perpetual", "ETH/USDC:USDC", "1m")
+    series = CandleSeries.from_frame(key, _minute_frame(6))
+
+    selected = select_period(
+        series,
+        start="2026-01-01T00:01:00Z",
+        end="2026-01-01T00:04:00Z",
+    )
+
+    assert selected.frame["timestamp"].tolist() == list(
+        pd.date_range("2026-01-01T00:01:00Z", periods=3, freq="1min")
+    )
+
+
+def test_period_selection_rejects_empty_or_reversed_range() -> None:
+    key = CandleSeriesKey("hyperliquid", "perpetual", "ETH/USDC:USDC", "1m")
+    series = CandleSeries.from_frame(key, _minute_frame(2))
+
+    with pytest.raises(CandleDataError, match="later"):
+        select_period(series, start="2026-01-02", end="2026-01-01")
+    with pytest.raises(CandleDataError, match="no candles"):
+        select_period(series, start="2026-01-02")

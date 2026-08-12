@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
-from typing import Iterator
+from typing import Iterator, Protocol
 
 import pandas as pd
 
@@ -35,6 +35,39 @@ class CandleGate:
             return False
         self._last_seen[key] = candle.open_time_ms
         return True
+
+
+class SarSignalChecker(Protocol):
+    """The pure SAR checker operations shared by live and offline runtimes."""
+
+    def get_current_sar_direction(self, df: pd.DataFrame) -> str | None: ...
+
+    def check_long(self, df: pd.DataFrame, **kwargs: object) -> bool: ...
+
+    def check_short(self, df: pd.DataFrame, **kwargs: object) -> bool: ...
+
+
+@dataclass(frozen=True)
+class SarSignalDecision:
+    direction: str | None
+    long_signal: bool
+    short_signal: bool
+
+
+def evaluate_sar_signal(
+    frame: pd.DataFrame,
+    checker: SarSignalChecker,
+) -> SarSignalDecision:
+    """Evaluate current direction and transition entry signals without I/O."""
+
+    direction = checker.get_current_sar_direction(frame)
+    if direction is None:
+        return SarSignalDecision(None, False, False)
+    return SarSignalDecision(
+        direction=direction,
+        long_signal=checker.check_long(frame),
+        short_signal=checker.check_short(frame),
+    )
 
 
 def closed_candles(

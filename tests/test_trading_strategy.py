@@ -10,6 +10,8 @@ from crypto_spot_collector.trading.strategy import (
     StrategyAction,
     StrategyState,
     StrategyStateMachine,
+    SarSignalDecision,
+    evaluate_sar_signal,
     latest_closed_identity,
 )
 
@@ -168,3 +170,23 @@ def test_same_direction_does_not_add_position() -> None:
 def test_flat_confirmation_rejected_outside_close() -> None:
     with pytest.raises(RuntimeError):
         StrategyStateMachine().confirm_flat()
+
+
+def test_sar_signal_evaluation_is_a_shared_pure_decision() -> None:
+    class Checker:
+        def get_current_sar_direction(self, df: pd.DataFrame) -> str | None:
+            return "long"
+
+        def check_long(self, df: pd.DataFrame, **kwargs: object) -> bool:
+            return True
+
+        def check_short(self, df: pd.DataFrame, **kwargs: object) -> bool:
+            return False
+
+    frame = pd.DataFrame({"sar_up": [1.0], "sar_down": [float("nan")]})
+
+    assert evaluate_sar_signal(frame, Checker()) == SarSignalDecision(
+        direction="long",
+        long_signal=True,
+        short_signal=False,
+    )
