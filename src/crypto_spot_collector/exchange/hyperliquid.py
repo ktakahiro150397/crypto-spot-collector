@@ -17,6 +17,7 @@ from crypto_spot_collector.exchange.types import (
     SpotOrderResult,
 )
 from crypto_spot_collector.trading.order_state import OrderIntent
+from crypto_spot_collector.trading.protection import ProtectionSpec
 
 
 @dataclass
@@ -178,6 +179,29 @@ class HyperLiquidExchange(IExchange):
 
     async def fetch_positions(self) -> list[dict[str, Any]]:
         return list(await self.exchange_public.fetch_positions())
+
+    async def create_protection_order(self, spec: ProtectionSpec) -> dict[str, Any]:
+        price_key = (
+            "takeProfitPrice" if spec.kind == "take_profit" else "stopLossPrice"
+        )
+        result = await self.exchange_private.create_order(
+            symbol=spec.symbol,
+            type="market",
+            side=spec.side,
+            amount=spec.amount,
+            price=spec.trigger_price,
+            params={
+                price_key: spec.trigger_price,
+                "reduceOnly": True,
+                "clientOrderId": spec.cloid,
+            },
+        )
+        return dict(result)
+
+    async def cancel_protection_orders(
+        self, symbol: str, order_ids: list[str]
+    ) -> None:
+        await self.cancel_orders_async(order_ids=order_ids, symbol=symbol)
 
     async def fetch_ohlcv_async(
         self,
@@ -471,50 +495,10 @@ class HyperLiquidExchange(IExchange):
         take_profit_trigger_price: float,
         stop_loss_trigger_price: float,
     ) -> HyperliquidTakeProfitStopLossPositionInfo | None:
-        # 現在のTP/SL注文をキャンセル
-        await self.cancel_orders_async(
-            order_ids=[takeprofit_order_id, stoploss_order_id],
-            symbol=symbol,
+        raise RuntimeError(
+            "unsafe cancel-then-create TP/SL update is disabled; "
+            "use ProtectionReconciler with the exchange position snapshot"
         )
-
-        side = "sell" if side == PositionSide.LONG else "buy"
-
-        # 新しいTP/SL注文を作成
-        await self.exchange_private.create_orders(
-            [
-                {
-                    "symbol": symbol,
-                    "type": "market",
-                    "side": side,
-                    "amount": 0,
-                    "price": stop_loss_trigger_price,
-                    "params": {
-                        "stopLossPrice": stop_loss_trigger_price,
-                        "reduceOnly": True,
-                    }
-                },
-                {
-                    "symbol": symbol,
-                    "type": "market",
-                    "side": side,
-                    "amount": 0,
-                    "price": take_profit_trigger_price,
-                    "params": {
-                        "takeProfitPrice": take_profit_trigger_price,
-                        "reduceOnly": True,
-                    }
-                },
-            ]
-        )
-
-        logger.info(
-            "Successfully created stop loss order")
-
-        # 更新後のTP/SL注文情報を返す
-        tp_sl_info = await self.fetch_tp_sl_info(
-            symbol=symbol,
-        )
-        return tp_sl_info
 
     async def cancel_orders_async(
         self,

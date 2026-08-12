@@ -30,6 +30,10 @@ from crypto_spot_collector.trading.order_state import (
     SQLiteOrderIntentStore,
     create_intent,
 )
+from crypto_spot_collector.trading.protection import (
+    ProtectionError,
+    ProtectionReconciler,
+)
 from crypto_spot_collector.trading.strategy import CandleGate, latest_closed_identity
 from crypto_spot_collector.utils.close_position_notification import (
     close_position_notification_message,
@@ -173,6 +177,12 @@ order_intent_store = SQLiteOrderIntentStore(
     Path(__file__).parent / "state" / "order_intents.sqlite"
 )
 order_executor = IdempotentOrderExecutor(hyperliquid_exchange, order_intent_store)
+protection_reconciler = ProtectionReconciler(
+    hyperliquid_exchange,
+    take_profit_roe=trading_config.take_profit_roe,
+    stop_loss_roe=trading_config.stop_loss_roe,
+    leverage=trading_config.leverage,
+)
 
 last_close_position_notification_time = datetime.now(timezone.utc)
 
@@ -183,6 +193,10 @@ async def initialize_trailing_manager() -> None:
 
     try:
         trailing_manager.clear_positions()
+
+        # Adopt the exchange snapshot and prove every live position has a
+        # verified TP/SL pair before the strategy loops are allowed to start.
+        await protection_reconciler.reconcile_all(perp_symbols)
 
         # 全シンボルの既存ポジションを取得
         all_positions = await hyperliquid_exchange.exchange_public.fetch_positions()
@@ -260,7 +274,9 @@ async def initialize_trailing_manager() -> None:
 
     except Exception as e:
         logger.error(f"Error during TrailingManager initialization: {e}")
-        # 初期化に失敗しても続行（新規ポジションから管理開始）
+        raise ProtectionError(
+            "startup protection reconciliation failed; trading is inhibited"
+        ) from e
 
 
 async def sync_trailing_position(positions: list[Position]) -> None:
@@ -596,25 +612,9 @@ async def update_stoploss_order(
 ) -> None:
     """ストップロス注文を更新する（トレーリング有効化時）"""
     try:
-        current_tp_sl_info = await hyperliquid_exchange.fetch_tp_sl_info(
+        await protection_reconciler.reconcile_symbol(
             symbol=symbol,
-        )
-
-        if current_tp_sl_info is None:
-            logger.warning(
-                f"Cannot update stoploss for {symbol}: No TP/SL info found. "
-                "Removing from TrailingManager."
-            )
-            trailing_manager.remove_position(symbol=symbol)
-            return
-
-        await hyperliquid_exchange.create_or_update_tp_sl_async(
-            symbol=symbol,
-            side=position.side,
-            takeprofit_order_id=current_tp_sl_info.take_profit_order_id,
-            stoploss_order_id=current_tp_sl_info.stop_loss_order_id,
-            take_profit_trigger_price=current_tp_sl_info.take_profit_trigger_price,
-            stop_loss_trigger_price=position.current_stoploss_price,
+            trailing_stop=position.current_stoploss_price,
         )
         logger.info(
             f"[Trailing Stop] Activated and updated stoploss for {symbol} "
@@ -622,6 +622,7 @@ async def update_stoploss_order(
         )
     except Exception as e:
         logger.error(f"Error updating stoploss order for {symbol}: {e}")
+        raise
 
 
 def handle_userFills(fill_data: dict[str, Any]) -> None:
@@ -821,13 +822,9 @@ async def check_trailing_stop(symbol: str, current_price: float) -> None:
             trailing_manager.remove_position(symbol=symbol)
             return
 
-        await hyperliquid_exchange.create_or_update_tp_sl_async(
+        await protection_reconciler.reconcile_symbol(
             symbol=symbol,
-            side=position.side,
-            takeprofit_order_id=current_tp_sl_info.take_profit_order_id,
-            stoploss_order_id=current_tp_sl_info.stop_loss_order_id,
-            take_profit_trigger_price=current_tp_sl_info.take_profit_trigger_price,
-            stop_loss_trigger_price=position.current_stoploss_price,
+            trailing_stop=position.current_stoploss_price,
         )
         logger.info(
             f"Updated trailing stoploss for {symbol} to {position.current_stoploss_price}")
