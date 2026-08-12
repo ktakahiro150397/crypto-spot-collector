@@ -93,6 +93,17 @@ async def test_user_fill_logs_do_not_expose_wallet_address() -> None:
 
 
 @pytest.mark.asyncio
+async def test_idle_heartbeat_uses_hyperliquid_ping_message() -> None:
+    websocket = FakeWebSocket()
+    client = HyperLiquidWebSocket(testnet=False)
+    client.ws = websocket  # type: ignore[assignment]
+
+    await client._send_heartbeat()
+
+    assert [json.loads(message) for message in websocket.sent] == [{"method": "ping"}]
+
+
+@pytest.mark.asyncio
 async def test_reconnect_restores_one_subscription_and_runs_snapshot_hook(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

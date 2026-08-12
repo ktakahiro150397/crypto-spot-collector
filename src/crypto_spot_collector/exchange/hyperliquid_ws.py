@@ -399,11 +399,13 @@ class HyperLiquidWebSocket:
                         )
 
                 except asyncio.TimeoutError:
-                    # Send ping to keep connection alive
+                    # Hyperliquid requires an application-level heartbeat. A
+                    # WebSocket control-frame ping does not reset its 60-second
+                    # idle timeout.
                     logger.debug("WebSocket receive timeout, sending ping")
                     if self.ws:
                         try:
-                            await self.ws.ping()
+                            await self._send_heartbeat()
                         except Exception as e:
                             logger.warning(f"Failed to send ping: {e}")
                             # Connection might be dead, trigger reconnection
@@ -441,6 +443,11 @@ class HyperLiquidWebSocket:
         result = self._callbacks[key](payload)
         if inspect.isawaitable(result):
             await result
+
+    async def _send_heartbeat(self) -> None:
+        if self.ws is None:
+            raise RuntimeError("WebSocket is not connected")
+        await self.ws.send(json.dumps({"method": "ping"}, separators=(",", ":")))
 
     async def __aenter__(self) -> "HyperLiquidWebSocket":
         """Async context manager entry."""
