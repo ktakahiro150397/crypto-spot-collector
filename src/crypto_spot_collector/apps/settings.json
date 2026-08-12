@@ -29,6 +29,8 @@
             "trailing_stop_activation_pnl_percent": 7.0,
             "sar_close_consecutive_count": 2
         },
-        "sandbox_mode": false
+        "network": "testnet",
+        "sandbox_mode": true,
+        "allow_mainnet": false
     }
 }

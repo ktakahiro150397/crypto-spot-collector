@@ -1,4 +1,5 @@
 import asyncio
+import os
 import sys
 from datetime import datetime, timedelta, timezone
 from io import BytesIO
@@ -22,6 +23,8 @@ from crypto_spot_collector.exchange.trailingstop.trailingstop_manager import (
 from crypto_spot_collector.exchange.types import PositionSide
 from crypto_spot_collector.notification.discord import discordNotification
 from crypto_spot_collector.providers.market_data_provider import MarketDataProvider
+from crypto_spot_collector.trading.config import TradingConfig
+from crypto_spot_collector.trading.strategy import CandleGate, latest_closed_identity
 from crypto_spot_collector.utils.close_position_notification import (
     close_position_notification_message,
 )
@@ -120,12 +123,21 @@ secret_file = Path(__file__).parent / "secrets.json"
 settings_file = Path(__file__).parent / "settings.json"
 secrets = load_config(secret_file, settings_file)
 
+# Validate every safety-critical setting before constructing clients or opening
+# any network connection. Mainnet confirmation must come from the environment;
+# it is deliberately not stored in settings.json.
+trading_config = TradingConfig.from_mapping(
+    secrets["settings"],
+    symbols=perp_symbols,
+    mainnet_confirmation=os.getenv("HYPERLIQUID_MAINNET_CONFIRMATION", ""),
+)
+
 notificator = discordNotification(
     secrets["discord"]["discordWebhookUrlPerpetual"])
 importer = HistoricalDataImporter()
 logger.info("Discord notification and historical data importer initialized")
 
-is_testnet = secrets["settings"].get("sandbox_mode", False)
+is_testnet = trading_config.testnet
 hyperliquid_exchange = HyperLiquidExchange(
     mainWalletAddress=secrets["hyperliquid"]["mainWalletAddress"],
     apiWalletAddress=secrets["hyperliquid"]["apiWalletAddress"],
@@ -150,6 +162,7 @@ sar_opposite_counter: dict[str, int] = {}
 
 trailing_manager = TrailingStopManagerHyperLiquid()
 background_tasks: set[asyncio.Task] = set()
+candle_gate = CandleGate()
 
 last_close_position_notification_time = datetime.now(timezone.utc)
 
@@ -684,8 +697,7 @@ async def signal_check_loop() -> None:
     timeframe_perp = secrets["settings"]["perpetual"].get("timeframe", "5m")
 
     logger.info("---- Settings ----")
-    logger.info(
-        f"Discord Webhook URL: {secrets['discord']['discordWebhookUrlPerpetual']}")
+    logger.info("Discord notification: configured")
     logger.info(f"Perp Symbols: {perp_symbols}")
     logger.info(f"Timeframe: {timeframe_perp}")
     logger.info(
@@ -839,6 +851,22 @@ async def check_signal(
         logger.warning(f"No data available for {symbol}")
         return
 
+    # Repository timestamps are candle open times. Never evaluate the candle
+    # whose interval is still in progress, and never execute the same closed
+    # symbol/timeframe candle twice in this process.
+    df, candle_identity = latest_closed_identity(
+        df,
+        symbol=symbol,
+        timeframe=timeframe,
+        now=endDate,
+    )
+    if candle_identity is None:
+        logger.debug(f"{symbol}: No closed candle available")
+        return
+    if not candle_gate.claim(candle_identity):
+        logger.debug(f"{symbol}: Candle already evaluated: {candle_identity.open_time_ms}")
+        return
+
     # Check for SAR direction and consecutive opposite signals for position closing
     previous_sar_direction = sar_direction_tracker.get(symbol)
     _, current_sar_direction = sar_checker.check_sar_direction_switch(
@@ -923,6 +951,10 @@ async def check_signal(
                 reason=f"Consecutive opposite SAR ({sar_close_consecutive_count}x): position={current_position_side}, SAR={current_sar_direction}",
                 timeframe=timeframe,
             )
+            # Close and reverse is intentionally two phase. A later pass must
+            # re-fetch the exchange position and observe it as flat before a
+            # reverse entry can be created.
+            return
 
     # Check for new entry signals
     threshold_percent = secrets["settings"]["perpetual"].get(
@@ -1453,6 +1485,7 @@ async def main() -> None:
             await listener_task
         except asyncio.CancelledError:
             pass
+        await hyperliquid_exchange.close()
         logger.info("WebSocket listener stopped")
 
 
