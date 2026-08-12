@@ -3,9 +3,9 @@ import pytest
 from crypto_spot_collector.trading.config import (
     MAINNET_CONFIRMATION,
     Network,
+    SignalMode,
     TradingConfig,
 )
-
 
 SYMBOLS = ("BTC/USDC:USDC",)
 
@@ -81,7 +81,18 @@ def test_invalid_values_fail_before_runtime(field: str, value: object) -> None:
 
 
 def test_legacy_mapping_without_sandbox_flag_remains_testnet() -> None:
-    config = TradingConfig.from_mapping(
-        {"perpetual": {}}, symbols=SYMBOLS
-    )
+    config = TradingConfig.from_mapping({"perpetual": {}}, symbols=SYMBOLS)
     assert config.network is Network.TESTNET
+    assert config.signal_mode is SignalMode.SAR_ONLY
+
+
+def test_signal_mode_is_explicit_and_exclusive() -> None:
+    config = TradingConfig.from_mapping(
+        {"perpetual": {"signal_mode": "price_change_only"}}, symbols=SYMBOLS
+    )
+    assert config.signal_mode is SignalMode.PRICE_CHANGE_ONLY
+
+    with pytest.raises(ValueError, match="signal mode"):
+        TradingConfig.from_mapping(
+            {"perpetual": {"signal_mode": "sar_or_price"}}, symbols=SYMBOLS
+        )

@@ -12,6 +12,11 @@ class Network(str, Enum):
     MAINNET = "mainnet"
 
 
+class SignalMode(str, Enum):
+    SAR_ONLY = "sar_only"
+    PRICE_CHANGE_ONLY = "price_change_only"
+
+
 MAINNET_CONFIRMATION = "I_UNDERSTAND_THIS_WILL_TRADE_ON_HYPERLIQUID_MAINNET"
 
 
@@ -35,6 +40,7 @@ class TradingConfig:
     sar_consecutive_count: int
     sar_close_consecutive_count: int
     price_change_threshold_percent: float
+    signal_mode: SignalMode = SignalMode.SAR_ONLY
     network: Network = Network.TESTNET
     allow_mainnet: bool = False
     mainnet_confirmation: str = ""
@@ -50,7 +56,9 @@ class TradingConfig:
         if len(set(self.symbols)) != len(self.symbols):
             errors.append("symbols must not contain duplicates")
         if any("/" not in symbol or ":" not in symbol for symbol in self.symbols):
-            errors.append("symbols must use the CCXT perpetual format BASE/QUOTE:SETTLE")
+            errors.append(
+                "symbols must use the CCXT perpetual format BASE/QUOTE:SETTLE"
+            )
         _timeframe_seconds(self.timeframe)
         if self.amount_usdc <= 0:
             errors.append("amount_usdc must be greater than zero")
@@ -70,6 +78,8 @@ class TradingConfig:
             errors.append("sar_close_consecutive_count must be greater than zero")
         if self.price_change_threshold_percent <= 0:
             errors.append("price_change_threshold_percent must be greater than zero")
+        if self.signal_mode not in {SignalMode.SAR_ONLY, SignalMode.PRICE_CHANGE_ONLY}:
+            errors.append("unsupported signal mode")
         if self.network is Network.MAINNET:
             if not self.allow_mainnet:
                 errors.append("mainnet requires allow_mainnet=true")
@@ -98,6 +108,15 @@ class TradingConfig:
         except ValueError as exc:
             raise ValueError(f"unsupported network: {network_value!r}") from exc
 
+        try:
+            signal_mode = SignalMode(
+                str(perpetual.get("signal_mode", SignalMode.SAR_ONLY.value)).lower()
+            )
+        except ValueError as exc:
+            raise ValueError(
+                f"unsupported signal mode: {perpetual.get('signal_mode')!r}"
+            ) from exc
+
         config = cls(
             symbols=tuple(symbols),
             timeframe=str(perpetual.get("timeframe", "30m")),
@@ -118,6 +137,7 @@ class TradingConfig:
             price_change_threshold_percent=float(
                 perpetual.get("price_change_threshold_percent", 0.5)
             ),
+            signal_mode=signal_mode,
             network=network,
             allow_mainnet=bool(settings.get("allow_mainnet", False)),
             mainnet_confirmation=mainnet_confirmation,

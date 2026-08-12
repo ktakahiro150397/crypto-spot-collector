@@ -19,6 +19,22 @@
   raw `create_order`, legacy order calls, or a raw `testnet` constructor flag
   cannot be reintroduced unnoticed.
 
+## SAR evaluation contract
+
+- `signal_mode=sar_only` is the production default and is explicit in the
+  production and sample settings. The optional price-change strategy is an
+  exclusive `price_change_only` mode; the former implicit SAR-or-price rule is
+  not used.
+- Candles must be UTC, unique, strictly increasing, contiguous across the SAR
+  warm-up tail, and include the most recently closed slot. Missing, stale,
+  duplicate, reversed, or insufficient input is rejected before state changes.
+- A SAR entry signal fires only on the newest closed candle that reaches the
+  configured run length. Historical runs and later candles in the same run do
+  not produce another entry intent.
+- The last processed candle, SAR direction, and consecutive opposite-position
+  count are stored in the runtime SQLite database. Restarting cannot count the
+  same candle twice; an aligned SAR or a flat position resets the counter.
+
 ## REST policy
 
 - Read-only calls use a 15-second timeout, at most four attempts, exponential

@@ -34,33 +34,36 @@ class SARChecker(SignalChecker):
     def _check_consecutive_values(
         self, values: Any, column_name: str, signal_type: str
     ) -> bool:
-        """
-        共通処理: NaNから数値に切り替わって、指定数連続で値が存在するかチェック。
+        """Return true only on the candle that reaches the configured run length.
 
         Args:
-            values: 逆順のSAR値配列 (最新 -> 古い順)
+            values: SAR values ordered oldest to newest
             column_name: チェック対象のカラム名（ログ出力用）
             signal_type: シグナルタイプ（'long' or 'short'）
 
         Returns:
             True if signal is detected, False otherwise
         """
-        consecutive = 0
-        for index, value in enumerate(values):
-            if pd.isna(value):
-                if consecutive == self.consecutive_count:
-                    logger.debug(
-                        f"SAR {signal_type} signal confirmed: "
-                        f"{self.consecutive_count} completed consecutive values"
-                    )
-                    return True
-                consecutive = 0
-                continue
-            consecutive += 1
+        series = list(values)
+        if len(series) < self.consecutive_count + 1:
+            logger.debug(
+                f"Signal check failed: {column_name} needs at least "
+                f"{self.consecutive_count + 1} rows"
+            )
+            return False
+
+        latest_run = series[-self.consecutive_count :]
+        boundary = series[-self.consecutive_count - 1]
+        if all(not pd.isna(value) for value in latest_run) and pd.isna(boundary):
+            logger.debug(
+                f"SAR {signal_type} signal confirmed on latest closed candle: "
+                f"{self.consecutive_count} consecutive values"
+            )
+            return True
 
         logger.debug(
-            f"Signal check failed: no completed run of "
-            f"{self.consecutive_count} {column_name} values"
+            f"Signal check failed: latest {column_name} run did not reach exactly "
+            f"{self.consecutive_count} values on the newest candle"
         )
         return False
 
@@ -82,23 +85,11 @@ class SARChecker(SignalChecker):
             logger.error("DataFrame does not contain 'sar_up' column")
             return False
 
-        # より多くのデータを確認（最大100件）
-        check_count = min(100, len(df))
-        recent_values = df["sar_up"].tail(check_count).values
-
-        # デバッグ用: df最新・最古の10件を表示
-        logger.debug(f"DataFrame head (oldest 10 rows):\n{df.head(10)}")
-        logger.debug(f"DataFrame tail (newest 10 rows):\n{df.tail(10)}")
-        # デバッグ用: tail(10) の sar_up 値を直接表示
-        tail_sar_up = df["sar_up"].tail(10).values
-        logger.debug(f"df['sar_up'].tail(10).values (oldest -> newest): {tail_sar_up}")
-        # デバッグ用: 最新10件の値を表示
-        logger.debug(
-            f"Latest 10 sar_up values (newest -> oldest): {recent_values[:10]}"
+        return self._check_consecutive_values(
+            df["sar_up"].tail(self.consecutive_count + 1).values,
+            "sar_up",
+            "long",
         )
-        logger.debug(f"Total data points checked: {check_count}")
-
-        return self._check_consecutive_values(recent_values, "sar_up", "long")
 
     def check_short(self, df: pd.DataFrame, **kwargs: Any) -> bool:
         """
@@ -118,17 +109,11 @@ class SARChecker(SignalChecker):
             logger.error("DataFrame does not contain 'sar_down' column")
             return False
 
-        # より多くのデータを確認（最大100件）
-        check_count = min(100, len(df))
-        recent_values = df["sar_down"].tail(check_count).values
-
-        # デバッグ用: 最新10件の値を表示
-        logger.debug(
-            f"Latest 10 sar_down values (newest -> oldest): {recent_values[:10]}"
+        return self._check_consecutive_values(
+            df["sar_down"].tail(self.consecutive_count + 1).values,
+            "sar_down",
+            "short",
         )
-        logger.debug(f"Total data points checked: {check_count}")
-
-        return self._check_consecutive_values(recent_values, "sar_down", "short")
 
     def check(self, df: pd.DataFrame, **kwargs: Any) -> bool:
         """
@@ -167,15 +152,18 @@ class SARChecker(SignalChecker):
         latest_sar_up = df["sar_up"].iloc[-1]
         latest_sar_down = df["sar_down"].iloc[-1]
 
-        if not pd.isna(latest_sar_up):
+        has_up = not pd.isna(latest_sar_up)
+        has_down = not pd.isna(latest_sar_down)
+        if has_up == has_down:
+            logger.warning("SAR direction is ambiguous")
+            return None
+        if has_up:
             logger.debug("Current SAR direction: long (bullish)")
             return "long"
-        elif not pd.isna(latest_sar_down):
+        if has_down:
             logger.debug("Current SAR direction: short (bearish)")
             return "short"
-        else:
-            logger.warning("SAR direction is ambiguous (both values are NaN)")
-            return None
+        return None
 
     def check_sar_direction_switch(
         self, df: pd.DataFrame, previous_direction: str | None

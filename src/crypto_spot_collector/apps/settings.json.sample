@@ -13,6 +13,7 @@
             }
         ],
         "perpetual": {
+            "signal_mode": "sar_only",
             "timeframe": "30m",
             "leverage": 20,
             "take_profit_rate": 0.1,

@@ -23,7 +23,7 @@ from crypto_spot_collector.exchange.trailingstop.trailingstop_manager import (
 from crypto_spot_collector.exchange.types import PositionSide
 from crypto_spot_collector.notification.discord import discordNotification
 from crypto_spot_collector.providers.market_data_provider import MarketDataProvider
-from crypto_spot_collector.trading.config import TradingConfig
+from crypto_spot_collector.trading.config import SignalMode, TradingConfig
 from crypto_spot_collector.trading.order_state import (
     IdempotentOrderExecutor,
     OrderStatus,
@@ -35,7 +35,11 @@ from crypto_spot_collector.trading.protection import (
     ProtectionReconciler,
 )
 from crypto_spot_collector.trading.runtime import RuntimeSupervisor
-from crypto_spot_collector.trading.strategy import CandleGate, latest_closed_identity
+from crypto_spot_collector.trading.strategy import (
+    CandleGate,
+    SQLiteSarStateStore,
+    latest_closed_identity,
+)
 from crypto_spot_collector.utils.close_position_notification import (
     close_position_notification_message,
 )
@@ -159,20 +163,12 @@ sar_checker = SARChecker(
     consecutive_count=secrets["settings"]["perpetual"]["consecutivePositiveCount"]
 )
 
-# SAR direction tracking per symbol
-# Key: symbol (e.g., "XRP/USDC:USDC"), Value: SAR direction ("long", "short", or None)
-sar_direction_tracker: dict[str, str | None] = {}
-
-# Counter for consecutive opposite SAR signals per symbol
-# Key: symbol, Value: consecutive count of opposite SAR direction
-sar_opposite_counter: dict[str, int] = {}
-
 trailing_manager = TrailingStopManagerHyperLiquid()
 background_tasks: set[asyncio.Task] = set()
 candle_gate = CandleGate()
-order_intent_store = SQLiteOrderIntentStore(
-    Path(__file__).parent / "state" / "order_intents.sqlite"
-)
+runtime_state_path = Path(__file__).parent / "state" / "order_intents.sqlite"
+order_intent_store = SQLiteOrderIntentStore(runtime_state_path)
+sar_state_store = SQLiteSarStateStore(runtime_state_path)
 order_executor = IdempotentOrderExecutor(hyperliquid_exchange, order_intent_store)
 protection_reconciler = ProtectionReconciler(
     hyperliquid_exchange,
@@ -418,84 +414,6 @@ def check_price_change_signal(
     )
 
     return is_long_signal, is_short_signal, price_change_percent, reason
-
-
-def should_long(df: pd.DataFrame, threshold_percent: float) -> tuple[bool, str]:
-    """
-    ロング（買い）シグナルを判断する関数。
-    SARシグナルまたは価格変動率シグナルのいずれかを満たす場合にロング。
-
-    Args:
-        df: OHLCVデータを含むDataFrame（インジケーター付き）
-        threshold_percent: 価格変動率の判断基準（%）
-
-    Returns:
-        tuple: (is_long_signal, reason)
-            - is_long_signal: ロングシグナルの有無
-            - reason: 判断理由
-    """
-    # SARシグナルチェック
-    is_long_sar = sar_checker.check_long(df)
-    logger.debug(f"should_long: SAR long signal: {is_long_sar}")
-
-    # 価格変動率シグナルチェック
-    is_long_price, _, price_change_pct, price_reason = check_price_change_signal(
-        df, threshold_percent
-    )
-    logger.debug(f"should_long: Price change long signal: {is_long_price}")
-
-    # いずれかのシグナルが発生した場合にロング
-    is_long = is_long_sar or is_long_price
-
-    # 理由を作成
-    reasons = []
-    if is_long_sar:
-        reasons.append("SAR bullish signal")
-    if is_long_price:
-        reasons.append(price_reason)
-
-    reason = " | ".join(reasons) if reasons else "No long signal"
-
-    return is_long, reason
-
-
-def should_short(df: pd.DataFrame, threshold_percent: float) -> tuple[bool, str]:
-    """
-    ショート（売り）シグナルを判断する関数。
-    SARシグナルまたは価格変動率シグナルのいずれかを満たす場合にショート。
-
-    Args:
-        df: OHLCVデータを含むDataFrame（インジケーター付き）
-        threshold_percent: 価格変動率の判断基準（%）
-
-    Returns:
-        tuple: (is_short_signal, reason)
-            - is_short_signal: ショートシグナルの有無
-            - reason: 判断理由
-    """
-    # SARシグナルチェック
-    is_short_sar = sar_checker.check_short(df)
-    logger.debug(f"should_short: SAR short signal: {is_short_sar}")
-
-    # 価格変動率シグナルチェック
-    _, is_short_price, price_change_pct, price_reason = check_price_change_signal(
-        df, threshold_percent
-    )
-    logger.debug(f"should_short: Price change short signal: {is_short_price}")
-
-    # いずれかのシグナルが発生した場合にショート
-    is_short = is_short_sar or is_short_price
-
-    # 理由を作成
-    reasons = []
-    if is_short_sar:
-        reasons.append("SAR bearish signal")
-    if is_short_price:
-        reasons.append(price_reason)
-
-    reason = " | ".join(reasons) if reasons else "No short signal"
-
-    return is_short, reason
 
 
 async def trailing_stop_loop() -> None:
@@ -893,12 +811,17 @@ async def check_signal(
     # Repository timestamps are candle open times. Never evaluate the candle
     # whose interval is still in progress, and never execute the same closed
     # symbol/timeframe candle twice in this process.
-    df, candle_identity = latest_closed_identity(
-        df,
-        symbol=symbol,
-        timeframe=timeframe,
-        now=endDate,
-    )
+    try:
+        df, candle_identity = latest_closed_identity(
+            df,
+            symbol=symbol,
+            timeframe=timeframe,
+            now=endDate,
+            required_rows=trading_config.sar_consecutive_count + 1,
+        )
+    except ValueError as exc:
+        logger.warning(f"{symbol}: Candle sequence rejected: {exc}")
+        return
     if candle_identity is None:
         logger.debug(f"{symbol}: No closed candle available")
         return
@@ -908,24 +831,10 @@ async def check_signal(
         )
         return
 
-    # Check for SAR direction and consecutive opposite signals for position closing
-    previous_sar_direction = sar_direction_tracker.get(symbol)
-    _, current_sar_direction = sar_checker.check_sar_direction_switch(
-        df, previous_sar_direction
-    )
-
-    # Update the tracker with current direction
-    sar_direction_tracker[symbol] = current_sar_direction
-
-    logger.debug(
-        f"{symbol}: SAR direction - Previous: {previous_sar_direction}, "
-        f"Current: {current_sar_direction}"
-    )
-
-    # Check if we need to close position based on consecutive opposite SAR signals
-    sar_close_consecutive_count = secrets["settings"]["perpetual"].get(
-        "sar_close_consecutive_count", 2
-    )
+    current_sar_direction = sar_checker.get_current_sar_direction(df)
+    if current_sar_direction is None:
+        logger.warning(f"{symbol}: Latest closed candle has ambiguous SAR direction")
+        return
 
     # Get current position for this symbol
     positions = await hyperliquid_exchange.exchange_public.fetch_positions()
@@ -939,39 +848,32 @@ async def check_signal(
                 current_position_side = pos.get("side")  # 'long' or 'short'
                 break
 
-    # Update opposite SAR counter based on position direction
-    should_close_position = False
-    if current_position is not None and current_sar_direction is not None:
-        # Determine if SAR is opposite to position
-        is_opposite_sar = (
-            current_position_side == "long" and current_sar_direction == "short"
-        ) or (current_position_side == "short" and current_sar_direction == "long")
-
-        if is_opposite_sar:
-            # Increment counter
-            sar_opposite_counter[symbol] = sar_opposite_counter.get(symbol, 0) + 1
-            logger.info(
-                f"{symbol}: Opposite SAR detected (position: {current_position_side}, "
-                f"SAR: {current_sar_direction}). Counter: {sar_opposite_counter[symbol]}/{sar_close_consecutive_count}"
-            )
-
-            # Check if threshold reached
-            if sar_opposite_counter[symbol] >= sar_close_consecutive_count:
-                should_close_position = True
-        else:
-            # Reset counter if SAR is same direction as position
-            if sar_opposite_counter.get(symbol, 0) > 0:
-                logger.debug(f"{symbol}: SAR aligned with position, resetting counter")
-            sar_opposite_counter[symbol] = 0
-    else:
-        # No position, reset counter
-        sar_opposite_counter[symbol] = 0
+    progress = sar_state_store.advance(
+        candle=candle_identity,
+        direction=current_sar_direction,
+        position_side=current_position_side,
+    )
+    if progress is None:
+        logger.debug(
+            f"{symbol}: Candle already persisted: {candle_identity.open_time_ms}"
+        )
+        return
+    logger.debug(
+        f"{symbol}: SAR direction - Previous: {progress.previous_direction}, "
+        f"Current: {progress.current_direction}, "
+        f"Opposite count: {progress.opposite_count}"
+    )
+    sar_close_consecutive_count = trading_config.sar_close_consecutive_count
+    should_close_position = (
+        current_position is not None
+        and progress.opposite_count >= sar_close_consecutive_count
+    )
 
     # Close position if consecutive opposite SAR threshold reached
     if should_close_position:
         logger.info(
             f"{symbol}: Consecutive opposite SAR threshold reached "
-            f"({sar_opposite_counter[symbol]}/{sar_close_consecutive_count}). "
+            f"({progress.opposite_count}/{sar_close_consecutive_count}). "
             f"Closing {current_position_side} position."
         )
         contracts = abs(float(current_position.get("contracts") or 0))
@@ -1001,7 +903,6 @@ async def check_signal(
                 }
             ]
             trailing_manager.remove_position(symbol=symbol)
-            sar_opposite_counter[symbol] = 0  # Reset counter after closing
             await send_close_position_notification(
                 symbol=symbol,
                 closed_positions=closed_positions,
@@ -1018,13 +919,20 @@ async def check_signal(
         )
         return
 
-    # Check for new entry signals
-    threshold_percent = secrets["settings"]["perpetual"].get(
-        "price_change_threshold_percent", 0.5
-    )
-
-    long_signal, long_reason = should_long(df, threshold_percent)
-    short_signal, short_reason = should_short(df, threshold_percent)
+    if trading_config.signal_mode is SignalMode.SAR_ONLY:
+        long_signal = sar_checker.check_long(df)
+        short_signal = sar_checker.check_short(df)
+        long_reason = "SAR bullish transition" if long_signal else "No long signal"
+        short_reason = "SAR bearish transition" if short_signal else "No short signal"
+    else:
+        long_signal, short_signal, _, price_reason = check_price_change_signal(
+            df, trading_config.price_change_threshold_percent
+        )
+        long_reason = price_reason if long_signal else "No long signal"
+        short_reason = price_reason if short_signal else "No short signal"
+    if long_signal and short_signal:
+        logger.error(f"{symbol}: Conflicting entry signals rejected")
+        return
 
     if long_signal or short_signal:
         logger.info(
