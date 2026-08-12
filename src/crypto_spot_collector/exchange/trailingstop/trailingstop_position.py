@@ -1,4 +1,3 @@
-
 from dataclasses import dataclass, field
 
 from crypto_spot_collector.exchange.types import PositionSide
@@ -9,6 +8,7 @@ class TrailingStopPositionBase:
     symbol: str
     side: PositionSide
     entry_price: float
+    contracts: float
 
     highest_price: float
     lowest_price: float

@@ -15,6 +15,7 @@ async def main() -> None:
         symbol=symbol,
         side=PositionSide.LONG,
         entry_price=entry_price,
+        contracts=1.0,
         stoploss_order_id="order123",
         initial_stoploss_price=stoploss_price,
     )
@@ -29,10 +30,12 @@ async def main() -> None:
         position = trailing_manager.get_position(symbol=symbol)
         if updated:
             print(
-                f"Price: {price}, New Stoploss Price: {position.current_stoploss_price}, AF Factor: {position.current_af_factor}")
+                f"Price: {price}, New Stoploss Price: {position.current_stoploss_price}, AF Factor: {position.current_af_factor}"
+            )
         else:
             print(
-                f"Price: {price}, No update to Stoploss Price: {position.current_stoploss_price}, AF Factor: {position.current_af_factor}")
+                f"Price: {price}, No update to Stoploss Price: {position.current_stoploss_price}, AF Factor: {position.current_af_factor}"
+            )
 
     # trailing_manager.remove_position(symbol=symbol)
 
@@ -41,11 +44,12 @@ async def main() -> None:
         symbol=symbol,
         side=PositionSide.SHORT,
         entry_price=entry_price,
+        contracts=1.0,
         stoploss_order_id="order456",
         initial_stoploss_price=stoploss_price_short,
     )
 
-    price_updates_short = [98, 105,  120, 85, 90, 80, 95]
+    price_updates_short = [98, 105, 120, 85, 90, 80, 95]
     for price in price_updates_short:
         updated = trailing_manager.update_stoploss_price(
             symbol=symbol,
@@ -54,11 +58,15 @@ async def main() -> None:
         position = trailing_manager.get_position(symbol=symbol)
         if updated:
             print(
-                f"[SHORT] Price: {price}, New Stoploss Price: {position.current_stoploss_price}, AF Factor: {position.current_af_factor}")
+                f"[SHORT] Price: {price}, New Stoploss Price: {position.current_stoploss_price}, AF Factor: {position.current_af_factor}"
+            )
         else:
             print(
-                f"[SHORT] Price: {price}, No update to Stoploss Price: {position.current_stoploss_price}, AF Factor: {position.current_af_factor}")
+                f"[SHORT] Price: {price}, No update to Stoploss Price: {position.current_stoploss_price}, AF Factor: {position.current_af_factor}"
+            )
+
 
 if __name__ == "__main__":
     import asyncio
+
     asyncio.run(main())

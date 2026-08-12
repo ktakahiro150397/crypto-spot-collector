@@ -19,6 +19,7 @@ from crypto_spot_collector.checkers.sar_checker import SARChecker
 from crypto_spot_collector.exchange.hyperliquid import HyperLiquidExchange
 from crypto_spot_collector.exchange.trailingstop.trailingstop_manager import (
     TrailingStopManagerHyperLiquid,
+    normalized_pnl_percentage,
 )
 from crypto_spot_collector.exchange.types import PositionSide
 from crypto_spot_collector.notification.discord import discordNotification
@@ -255,6 +256,7 @@ async def initialize_trailing_manager() -> None:
                     symbol=symbol,
                     side=position_side,
                     entry_price=entry_price,
+                    contracts=float(contracts),
                     stoploss_order_id=tp_sl_info.stop_loss_order_id,
                     initial_stoploss_price=tp_sl_info.stop_loss_trigger_price,
                     trailing_activated=trailing_activated,
@@ -291,6 +293,7 @@ async def sync_trailing_position(positions: list[Position]) -> None:
         )
 
         synced_count = 0
+        active_symbols: set[str] = set()
         for pos in positions:
             contracts = pos.get("contracts", 0)
             if not contracts or float(contracts) == 0:
@@ -328,25 +331,20 @@ async def sync_trailing_position(positions: list[Position]) -> None:
             else:  # SHORT
                 new_trailing_activated = current_sl_price <= entry_price
 
-            # 既存のポジションが既にtrailing_activated=Trueの場合は維持する
-            # （浮動小数点の精度差でFalseに戻ることを防ぐ）
-            existing_position = trailing_manager.get_position(symbol=symbol)
-            if existing_position is not None and existing_position.trailing_activated:
-                trailing_activated = True
-            else:
-                trailing_activated = new_trailing_activated
-
             # TrailingManagerのポジションを更新
             trailing_manager.add_or_update_position(
                 symbol=symbol,
                 side=position_side,
                 entry_price=entry_price,
+                contracts=float(contracts),
                 stoploss_order_id=tp_sl_info.stop_loss_order_id,
                 initial_stoploss_price=tp_sl_info.stop_loss_trigger_price,
-                trailing_activated=trailing_activated,
+                trailing_activated=new_trailing_activated,
             )
+            active_symbols.add(symbol)
             synced_count += 1
 
+        trailing_manager.remove_missing(active_symbols)
         logger.debug(f"Sync complete. Updated {synced_count} position(s).")
 
     except Exception as e:
@@ -421,13 +419,8 @@ async def trailing_stop_loop() -> None:
     トレーリングストップ管理ループ: 設定された間隔（デフォルト15分）ごとに実行。
     毎時0, 15, 30, 45分などに実行される。
     """
-    # 設定から間隔と有効化PnL閾値を取得
-    interval_minutes = secrets["settings"]["perpetual"].get(
-        "trailing_stop_interval_minutes", 15
-    )
-    activation_pnl_percent = secrets["settings"]["perpetual"].get(
-        "trailing_stop_activation_pnl_percent", 10.0
-    )
+    interval_minutes = trading_config.trailing_interval_minutes
+    activation_pnl_percent = trading_config.trailing_activation_roe
 
     logger.info(
         f"Starting trailing stop loop. "
@@ -476,10 +469,17 @@ async def trailing_stop_loop() -> None:
                 if symbol not in perp_symbols:
                     continue
 
-                pnl_percent = pos.get("percentage", 0)
-                unrealized_pnl = pos.get("unrealizedPnl", 0)
-                if unrealized_pnl < 0:
-                    pnl_percent *= -1
+                try:
+                    pnl_percent = normalized_pnl_percentage(
+                        pos.get("percentage", 0),
+                        pos.get("unrealizedPnl", 0),
+                    )
+                except (TypeError, ValueError) as exc:
+                    logger.error(
+                        f"[Trailing Stop] {symbol}: invalid PnL snapshot; "
+                        f"skipping activation: {exc}"
+                    )
+                    continue
 
                 # TrailingManagerにポジションが登録されているか確認
                 trailing_position = trailing_manager.get_position(symbol=symbol)
@@ -1020,6 +1020,7 @@ async def execute_long_order(
                 symbol=symbol,
                 side=PositionSide.LONG,
                 entry_price=current_price,
+                contracts=amount,
                 stoploss_order_id=current_tp_sl_info.stop_loss_order_id,
                 initial_stoploss_price=current_tp_sl_info.stop_loss_trigger_price,
             )
@@ -1120,6 +1121,7 @@ async def execute_short_order(
                 symbol=symbol,
                 side=PositionSide.SHORT,
                 entry_price=current_price,
+                contracts=amount,
                 stoploss_order_id=current_tp_sl_info.stop_loss_order_id,
                 initial_stoploss_price=current_tp_sl_info.stop_loss_trigger_price,
             )

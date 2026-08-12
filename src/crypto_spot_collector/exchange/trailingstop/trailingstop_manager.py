@@ -1,4 +1,5 @@
-from typing import TypedDict, Unpack
+import math
+from collections.abc import Collection
 
 from loguru import logger
 
@@ -8,13 +9,38 @@ from crypto_spot_collector.exchange.trailingstop.trailingstop_position import (
 from crypto_spot_collector.exchange.types import PositionSide
 
 
-class TrailingStopManagerOptionHyperliquid(TypedDict):
-    stoploss_order_id: str
-    initial_stoploss_price: float
-    trailing_activated: bool
+def normalized_pnl_percentage(
+    percentage: float | int | str,
+    unrealized_pnl: float | int | str,
+) -> float:
+    """Return a signed PnL percentage using unrealized PnL as sign authority."""
+
+    normalized_percentage = float(percentage)
+    normalized_unrealized_pnl = float(unrealized_pnl)
+    if not math.isfinite(normalized_percentage) or not math.isfinite(
+        normalized_unrealized_pnl
+    ):
+        raise ValueError("PnL percentage and unrealized PnL must be finite")
+    if normalized_unrealized_pnl < 0:
+        return -abs(normalized_percentage)
+    if normalized_unrealized_pnl > 0:
+        return abs(normalized_percentage)
+    return 0.0
 
 
-class TrailingStopManagerHyperLiquid():
+def pnl_reaches_activation(
+    percentage: float | int | str,
+    unrealized_pnl: float | int | str,
+    activation_threshold: float,
+) -> bool:
+    """Return whether a profitable position reaches the activation threshold."""
+
+    if activation_threshold <= 0 or not math.isfinite(activation_threshold):
+        raise ValueError("activation threshold must be finite and greater than zero")
+    return normalized_pnl_percentage(percentage, unrealized_pnl) >= activation_threshold
+
+
+class TrailingStopManagerHyperLiquid:
 
     def __init__(self) -> None:
         super().__init__()
@@ -35,38 +61,63 @@ class TrailingStopManagerHyperLiquid():
         symbol: str,
         side: PositionSide,
         entry_price: float,
-        **kwargs: Unpack[TrailingStopManagerOptionHyperliquid]
+        *,
+        contracts: float,
+        stoploss_order_id: str,
+        initial_stoploss_price: float,
+        trailing_activated: bool = False,
     ) -> None:
-        stoploss_order_id: str = kwargs.get("stoploss_order_id", "")
-        initial_stoploss_price: float = kwargs.get(
-            "initial_stoploss_price", 0.0)
-        trailing_activated: bool = kwargs.get("trailing_activated", False)
+        entry_price = float(entry_price)
+        contracts = abs(float(contracts))
+        initial_stoploss_price = float(initial_stoploss_price)
 
-        if symbol in self.positions:
-            # 既存ポジションがある場合は、重要な状態を引き継ぐ
-            existing_position = self.positions[symbol]
+        values = (entry_price, contracts, initial_stoploss_price)
+        if not all(math.isfinite(value) and value > 0 for value in values):
+            raise ValueError(
+                "entry price, contracts and initial stop-loss price must be "
+                "finite and positive"
+            )
+
+        existing_position = self.positions.get(symbol)
+        if existing_position is not None and self._is_same_position(
+            existing_position,
+            side=side,
+            entry_price=entry_price,
+            contracts=contracts,
+        ):
             logger.info(
                 f"Updating Trailing Stop Position for {symbol} - "
                 f"preserving trailing state: activated={existing_position.trailing_activated}, "
                 f"af_factor={existing_position.current_af_factor}, "
                 f"highest={existing_position.highest_price}, lowest={existing_position.lowest_price}"
             )
-            # オーダーIDのみ更新（必須）
             existing_position.stoploss_order_id = stoploss_order_id
-            # trailing_activatedは引数で明示的に指定されていなければ既存を維持
-            # ※ kwargsに指定がない場合はFalseになるが、既存を優先
-            if "trailing_activated" not in kwargs:
-                # 引数で明示されていなければ既存の状態を維持
-                pass
+            existing_position.trailing_activated = (
+                existing_position.trailing_activated or trailing_activated
+            )
+            if side == PositionSide.LONG:
+                existing_position.current_stoploss_price = max(
+                    existing_position.current_stoploss_price,
+                    initial_stoploss_price,
+                )
             else:
-                existing_position.trailing_activated = trailing_activated
-            # entry_price, side, current_af_factor, highest/lowest_price, current_stoploss_price は維持
+                existing_position.current_stoploss_price = min(
+                    existing_position.current_stoploss_price,
+                    initial_stoploss_price,
+                )
         else:
-            logger.info(f"Adding new Trailing Stop Position for {symbol}")
+            if existing_position is None:
+                logger.info(f"Adding new Trailing Stop Position for {symbol}")
+            else:
+                logger.info(
+                    f"Resetting Trailing Stop Position for {symbol}: "
+                    "side, entry price, or contracts changed"
+                )
             position = TrailingStopPositionHyperLiquid(
                 symbol=symbol,
                 side=side,
                 entry_price=entry_price,
+                contracts=contracts,
                 stoploss_order_id=stoploss_order_id,
                 highest_price=entry_price,
                 lowest_price=entry_price,
@@ -77,6 +128,20 @@ class TrailingStopManagerHyperLiquid():
 
             self.positions[symbol] = position
 
+    @staticmethod
+    def _is_same_position(
+        position: TrailingStopPositionHyperLiquid,
+        *,
+        side: PositionSide,
+        entry_price: float,
+        contracts: float,
+    ) -> bool:
+        return (
+            position.side == side
+            and math.isclose(position.entry_price, entry_price, rel_tol=1e-9)
+            and math.isclose(position.contracts, contracts, rel_tol=1e-9)
+        )
+
     def get_position(self, symbol: str) -> TrailingStopPositionHyperLiquid | None:
         return self.positions.get(symbol, None)
 
@@ -85,12 +150,18 @@ class TrailingStopManagerHyperLiquid():
             del self.positions[symbol]
             logger.info(f"Removed Trailing Stop Position for {symbol}")
         else:
-            logger.warning(
-                f"Attempted to remove non-existent position for {symbol}")
+            logger.warning(f"Attempted to remove non-existent position for {symbol}")
 
     def clear_positions(self) -> None:
         self.positions.clear()
         logger.info("Cleared all Trailing Stop Positions")
+
+    def remove_missing(self, active_symbols: Collection[str]) -> None:
+        """Remove local state for positions absent from an exchange snapshot."""
+
+        active = set(active_symbols)
+        for symbol in set(self.positions) - active:
+            self.remove_position(symbol)
 
     def update_stoploss_price(
         self,
@@ -104,9 +175,11 @@ class TrailingStopManagerHyperLiquid():
         :rtype: bool Indicates whether the stoploss price was updated.
         """
 
+        if not math.isfinite(current_price) or current_price <= 0:
+            raise ValueError("current price must be finite and positive")
+
         if symbol not in self.positions:
-            logger.warning(
-                f"Position for {symbol} not found in Trailing Stop Manager.")
+            logger.warning(f"Position for {symbol} not found in Trailing Stop Manager.")
             return False
 
         position = self.positions[symbol]
@@ -114,7 +187,8 @@ class TrailingStopManagerHyperLiquid():
         # トレーリングが有効化されていない場合はスキップ
         if not position.trailing_activated:
             logger.debug(
-                f"Trailing not activated for {symbol}, skipping stoploss update")
+                f"Trailing not activated for {symbol}, skipping stoploss update"
+            )
             return False
 
         if position.side == PositionSide.LONG:
@@ -144,9 +218,11 @@ class TrailingStopManagerHyperLiquid():
         Returns:
             bool: 有効化に成功した場合True
         """
+        if not math.isfinite(current_price) or current_price <= 0:
+            raise ValueError("current price must be finite and positive")
+
         if symbol not in self.positions:
-            logger.warning(
-                f"Position for {symbol} not found in Trailing Stop Manager.")
+            logger.warning(f"Position for {symbol} not found in Trailing Stop Manager.")
             return False
 
         position = self.positions[symbol]
@@ -158,8 +234,18 @@ class TrailingStopManagerHyperLiquid():
         # トレーリングを有効化
         position.trailing_activated = True
 
-        # ストップロスをエントリー価格に設定
-        position.current_stoploss_price = position.entry_price
+        # Move protection to at least breakeven without weakening a stop that
+        # was already made more protective outside this process.
+        if position.side == PositionSide.LONG:
+            position.current_stoploss_price = max(
+                position.current_stoploss_price,
+                position.entry_price,
+            )
+        else:
+            position.current_stoploss_price = min(
+                position.current_stoploss_price,
+                position.entry_price,
+            )
 
         # 現在価格でhighest/lowest priceを更新
         if position.side == PositionSide.LONG:
@@ -172,7 +258,7 @@ class TrailingStopManagerHyperLiquid():
 
         logger.info(
             f"Activated trailing stop for {symbol}: "
-            f"stoploss set to entry price {position.entry_price:.4f}, "
+            f"stoploss protected at {position.current_stoploss_price:.4f}, "
             f"AF factor reset to {self.initial_af_factor}"
         )
 
@@ -186,12 +272,20 @@ class TrailingStopManagerHyperLiquid():
         if current_price > position.highest_price:
             position.highest_price = current_price
             logger.info(
-                f"New highest price for {position.symbol}: {position.highest_price}")
+                f"New highest price for {position.symbol}: {position.highest_price}"
+            )
 
             # Calculate and update the new stoploss price
             stoploss_price_movement = (
-                position.highest_price - position.current_stoploss_price) * position.current_af_factor
-            new_stoploss_price = position.current_stoploss_price + stoploss_price_movement
+                position.highest_price - position.current_stoploss_price
+            ) * position.current_af_factor
+            new_stoploss_price = max(
+                position.current_stoploss_price,
+                min(
+                    position.highest_price,
+                    position.current_stoploss_price + stoploss_price_movement,
+                ),
+            )
 
             new_current_af_factor = min(
                 position.current_af_factor + self.af_factor_increment_step,
@@ -199,16 +293,19 @@ class TrailingStopManagerHyperLiquid():
             )
 
             logger.info(
-                f"Updated stoploss price for {position.symbol}: {position.current_stoploss_price} -> {new_stoploss_price}")
+                f"Updated stoploss price for {position.symbol}: {position.current_stoploss_price} -> {new_stoploss_price}"
+            )
             logger.info(
-                f"Updated AF factor for {position.symbol}: {position.current_af_factor} -> {new_current_af_factor}")
+                f"Updated AF factor for {position.symbol}: {position.current_af_factor} -> {new_current_af_factor}"
+            )
             position.current_stoploss_price = new_stoploss_price
             position.current_af_factor = new_current_af_factor
 
             return True
         else:
             logger.debug(
-                f"No update to highest price for {position.symbol}: current price {current_price}, highest price {position.highest_price}")
+                f"No update to highest price for {position.symbol}: current price {current_price}, highest price {position.highest_price}"
+            )
             return False
 
     def _update_short_position_stoploss_price(
@@ -219,13 +316,21 @@ class TrailingStopManagerHyperLiquid():
         if current_price < position.lowest_price:
             position.lowest_price = current_price
             logger.info(
-                f"New lowest price for {position.symbol}: {position.lowest_price}")
+                f"New lowest price for {position.symbol}: {position.lowest_price}"
+            )
 
             # Calculate and update the new stoploss price
             # For SHORT: SAR moves down as price moves down
             stoploss_price_movement = (
-                position.current_stoploss_price - position.lowest_price) * position.current_af_factor
-            new_stoploss_price = position.current_stoploss_price - stoploss_price_movement
+                position.current_stoploss_price - position.lowest_price
+            ) * position.current_af_factor
+            new_stoploss_price = min(
+                position.current_stoploss_price,
+                max(
+                    position.lowest_price,
+                    position.current_stoploss_price - stoploss_price_movement,
+                ),
+            )
 
             new_current_af_factor = min(
                 position.current_af_factor + self.af_factor_increment_step,
@@ -233,15 +338,18 @@ class TrailingStopManagerHyperLiquid():
             )
 
             logger.info(
-                f"Updated stoploss price for {position.symbol}: {position.current_stoploss_price} -> {new_stoploss_price}")
+                f"Updated stoploss price for {position.symbol}: {position.current_stoploss_price} -> {new_stoploss_price}"
+            )
             logger.info(
-                f"Updated AF factor for {position.symbol}: {position.current_af_factor} -> {new_current_af_factor}")
+                f"Updated AF factor for {position.symbol}: {position.current_af_factor} -> {new_current_af_factor}"
+            )
             position.current_stoploss_price = new_stoploss_price
             position.current_af_factor = new_current_af_factor
 
             return True
         else:
             logger.debug(
-                f"No update to lowest price for {position.symbol}: current price {current_price}, lowest price {position.lowest_price}")
+                f"No update to lowest price for {position.symbol}: current price {current_price}, lowest price {position.lowest_price}"
+            )
 
             return False
