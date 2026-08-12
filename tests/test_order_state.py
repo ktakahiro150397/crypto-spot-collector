@@ -33,7 +33,9 @@ class FakeAdapter:
             raise self.response
         return self.response
 
-    async def fetch_order_by_cloid(self, symbol: str, cloid: str) -> dict[str, Any] | None:
+    async def fetch_order_by_cloid(
+        self, symbol: str, cloid: str
+    ) -> dict[str, Any] | None:
         return self.order
 
     async def fetch_open_orders(self, symbol: str) -> Sequence[dict[str, Any]]:
@@ -69,8 +71,12 @@ def test_intent_id_and_cloid_are_deterministic_128_bit_hex() -> None:
 @pytest.mark.asyncio
 async def test_duplicate_execution_submits_only_once(tmp_path: Path) -> None:
     adapter = FakeAdapter()
-    executor = IdempotentOrderExecutor(adapter, SQLiteOrderIntentStore(tmp_path / "orders.sqlite"))
-    first, second = await asyncio.gather(executor.execute(intent()), executor.execute(intent()))
+    executor = IdempotentOrderExecutor(
+        adapter, SQLiteOrderIntentStore(tmp_path / "orders.sqlite")
+    )
+    first, second = await asyncio.gather(
+        executor.execute(intent()), executor.execute(intent())
+    )
     assert first.status is OrderStatus.FILLED
     assert second.status is OrderStatus.FILLED
     assert adapter.submit_count == 1
@@ -86,7 +92,9 @@ async def test_timeout_reconciles_by_cloid_without_resubmit(tmp_path: Path) -> N
         "status": "open",
         "filled": 0,
     }
-    executor = IdempotentOrderExecutor(adapter, SQLiteOrderIntentStore(tmp_path / "orders.sqlite"))
+    executor = IdempotentOrderExecutor(
+        adapter, SQLiteOrderIntentStore(tmp_path / "orders.sqlite")
+    )
     result = await executor.execute(intent())
     assert result.status is OrderStatus.OPEN
     assert result.order_id == "77"
@@ -102,7 +110,9 @@ async def test_ambiguous_timeout_stays_unknown(tmp_path: Path) -> None:
     adapter = FakeAdapter()
     adapter.response = TimeoutError()
     adapter.positions = [{"symbol": "BTC/USDC:USDC", "contracts": 1}]
-    executor = IdempotentOrderExecutor(adapter, SQLiteOrderIntentStore(tmp_path / "orders.sqlite"))
+    executor = IdempotentOrderExecutor(
+        adapter, SQLiteOrderIntentStore(tmp_path / "orders.sqlite")
+    )
     result = await executor.execute(intent())
     assert result.status is OrderStatus.UNKNOWN
     assert "resubmit inhibited" in (result.error or "")
@@ -114,19 +124,89 @@ async def test_ambiguous_timeout_stays_unknown(tmp_path: Path) -> None:
 async def test_partial_fill_is_persisted(tmp_path: Path) -> None:
     adapter = FakeAdapter()
     adapter.response = {"id": "1", "status": "open", "filled": 0.4}
-    executor = IdempotentOrderExecutor(adapter, SQLiteOrderIntentStore(tmp_path / "orders.sqlite"))
+    executor = IdempotentOrderExecutor(
+        adapter, SQLiteOrderIntentStore(tmp_path / "orders.sqlite")
+    )
     result = await executor.execute(intent())
     assert result.status is OrderStatus.PARTIALLY_FILLED
     assert result.filled == 0.4
 
 
 @pytest.mark.asyncio
-async def test_statusless_market_response_reconciles_fill_by_cloid(tmp_path: Path) -> None:
+async def test_confirmed_execution_does_not_treat_partial_fill_as_success(
+    tmp_path: Path,
+) -> None:
+    adapter = FakeAdapter()
+    adapter.response = {"id": "1", "status": "open", "filled": 0.4}
+    adapter.order = {
+        "id": "1",
+        "clientOrderId": intent().cloid,
+        "status": "open",
+        "filled": 0.4,
+    }
+    executor = IdempotentOrderExecutor(
+        adapter, SQLiteOrderIntentStore(tmp_path / "orders.sqlite")
+    )
+
+    result = await executor.execute_confirmed(
+        intent(), settlement_attempts=1, settlement_delay=0
+    )
+
+    assert result.status is OrderStatus.UNKNOWN
+    assert result.filled == 0.4
+    assert "deadline" in (result.error or "")
+
+
+@pytest.mark.asyncio
+async def test_stale_open_order_becomes_unknown_and_blocks_resubmit(
+    tmp_path: Path,
+) -> None:
+    adapter = FakeAdapter()
+    adapter.response = {"id": "1", "status": "open", "filled": 0}
+    adapter.order = {
+        "id": "1",
+        "clientOrderId": intent().cloid,
+        "status": "open",
+        "filled": 0,
+    }
+    executor = IdempotentOrderExecutor(
+        adapter, SQLiteOrderIntentStore(tmp_path / "orders.sqlite")
+    )
+
+    result = await executor.execute_confirmed(
+        intent(), settlement_attempts=1, settlement_delay=0
+    )
+
+    assert result.status is OrderStatus.UNKNOWN
+    assert adapter.submit_count == 1
+    await executor.execute(intent())
+    assert adapter.submit_count == 1
+
+
+@pytest.mark.asyncio
+async def test_statusless_closed_response_requires_fill_evidence(
+    tmp_path: Path,
+) -> None:
+    adapter = FakeAdapter()
+    adapter.response = {"id": "1", "status": "closed", "filled": 0}
+    executor = IdempotentOrderExecutor(
+        adapter, SQLiteOrderIntentStore(tmp_path / "orders.sqlite")
+    )
+
+    result = await executor.execute_confirmed(
+        intent(), settlement_attempts=1, settlement_delay=0
+    )
+
+    assert result.status is OrderStatus.UNKNOWN
+
+
+@pytest.mark.asyncio
+async def test_statusless_market_response_reconciles_fill_by_cloid(
+    tmp_path: Path,
+) -> None:
     adapter = FakeAdapter()
     adapter.response = {"id": "88", "status": None, "filled": 0}
-    adapter.fills = [
-        {"amount": 1.0, "info": {"cloid": intent().cloid}}
-    ]
+    adapter.fills = [{"amount": 1.0, "info": {"cloid": intent().cloid}}]
     executor = IdempotentOrderExecutor(
         adapter, SQLiteOrderIntentStore(tmp_path / "orders.sqlite")
     )
@@ -153,6 +233,48 @@ async def test_fill_ledger_overrides_stale_open_order_snapshot(tmp_path: Path) -
     result = await executor.execute(intent())
     assert result.status is OrderStatus.FILLED
     assert result.filled == 1.0
+
+
+@pytest.mark.asyncio
+async def test_unsettled_intent_inhibits_later_candle_for_same_symbol(
+    tmp_path: Path,
+) -> None:
+    adapter = FakeAdapter()
+    adapter.response = TimeoutError()
+    executor = IdempotentOrderExecutor(
+        adapter, SQLiteOrderIntentStore(tmp_path / "orders.sqlite")
+    )
+    await executor.execute(intent())
+    later = create_intent(
+        strategy="sar-v1",
+        symbol="BTC/USDC:USDC",
+        timeframe="30m",
+        candle_open_ms=456,
+        side="sell",
+        amount=1.0,
+    )
+
+    with pytest.raises(RuntimeError, match="unsettled intent"):
+        await executor.execute(later)
+
+
+@pytest.mark.asyncio
+async def test_restart_recovers_submitting_intent_without_resubmit(
+    tmp_path: Path,
+) -> None:
+    store = SQLiteOrderIntentStore(tmp_path / "orders.sqlite")
+    prepared, _ = store.prepare(intent())
+    store.transition(prepared.intent_id, OrderStatus.SUBMITTING)
+    adapter = FakeAdapter()
+    adapter.fills = [{"amount": 1.0, "info": {"cloid": intent().cloid}}]
+    executor = IdempotentOrderExecutor(adapter, store)
+
+    recovered = await executor.recover_unsettled(
+        settlement_attempts=1, settlement_delay=0
+    )
+
+    assert [item.status for item in recovered] == [OrderStatus.FILLED]
+    assert adapter.submit_count == 0
 
 
 def test_store_does_not_leave_sqlite_file_locked(tmp_path: Path) -> None:

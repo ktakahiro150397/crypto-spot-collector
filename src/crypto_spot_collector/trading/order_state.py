@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import math
 import sqlite3
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -25,6 +26,7 @@ class OrderStatus(str, Enum):
 
 
 TERMINAL_STATUSES = {OrderStatus.FILLED, OrderStatus.CANCELLED, OrderStatus.REJECTED}
+SUCCESS_STATUSES = {OrderStatus.FILLED}
 
 ALLOWED_TRANSITIONS: dict[OrderStatus, set[OrderStatus]] = {
     OrderStatus.PREPARED: {OrderStatus.SUBMITTING},
@@ -204,6 +206,18 @@ class SQLiteOrderIntentStore:
             ).fetchone()
         return self._from_row(row) if row is not None else None
 
+    def list_unsettled(self, symbol: str | None = None) -> list[OrderIntent]:
+        placeholders = ", ".join("?" for _ in TERMINAL_STATUSES)
+        parameters: list[Any] = [status.value for status in TERMINAL_STATUSES]
+        query = f"SELECT * FROM order_intents WHERE status NOT IN ({placeholders})"
+        if symbol is not None:
+            query += " AND symbol = ?"
+            parameters.append(symbol)
+        query += " ORDER BY updated_at, intent_id"
+        with self._transaction() as connection:
+            rows = connection.execute(query, parameters).fetchall()
+        return [self._from_row(row) for row in rows]
+
     def transition(
         self,
         intent_id: str,
@@ -222,7 +236,9 @@ class SQLiteOrderIntentStore:
                 raise KeyError(intent_id)
             current = OrderStatus(row["status"])
             if status is not current and status not in ALLOWED_TRANSITIONS[current]:
-                raise ValueError(f"invalid order transition: {current.value} -> {status.value}")
+                raise ValueError(
+                    f"invalid order transition: {current.value} -> {status.value}"
+                )
             connection.execute(
                 """
                 UPDATE order_intents
@@ -292,6 +308,16 @@ class IdempotentOrderExecutor:
             raise RuntimeError("new order intents are disabled during shutdown")
         lock = self._locks.setdefault(requested.symbol, asyncio.Lock())
         async with lock:
+            conflicting = [
+                intent
+                for intent in self.store.list_unsettled(requested.symbol)
+                if intent.intent_id != requested.intent_id
+            ]
+            if conflicting:
+                raise RuntimeError(
+                    f"unsettled intent {conflicting[0].cloid} inhibits a new order "
+                    f"for {requested.symbol}"
+                )
             intent, created = self.store.prepare(requested)
             if not created:
                 if intent.status is OrderStatus.PREPARED:
@@ -325,19 +351,75 @@ class IdempotentOrderExecutor:
                 return await self.reconcile(applied)
             return applied
 
+    async def execute_confirmed(
+        self,
+        requested: OrderIntent,
+        *,
+        settlement_attempts: int = 4,
+        settlement_delay: float = 0.25,
+    ) -> OrderIntent:
+        """Execute and require exchange evidence of a terminal order state."""
+
+        if settlement_attempts < 1 or settlement_delay < 0:
+            raise ValueError("invalid settlement policy")
+        intent = await self.execute(requested)
+        for _ in range(settlement_attempts):
+            if intent.status in TERMINAL_STATUSES:
+                return intent
+            if settlement_delay:
+                await asyncio.sleep(settlement_delay)
+            intent = await self.reconcile(intent)
+        if intent.status not in TERMINAL_STATUSES:
+            intent = self.store.transition(
+                intent.intent_id,
+                OrderStatus.UNKNOWN,
+                filled=intent.filled,
+                order_id=intent.order_id,
+                error=(
+                    "order confirmation deadline exceeded; automatic resubmit "
+                    "and later intents are inhibited"
+                ),
+            )
+        return intent
+
+    async def recover_unsettled(
+        self,
+        *,
+        settlement_attempts: int = 4,
+        settlement_delay: float = 0.25,
+    ) -> list[OrderIntent]:
+        """Resume durable intents before strategy workers start after restart."""
+
+        recovered: list[OrderIntent] = []
+        for intent in self.store.list_unsettled():
+            recovered.append(
+                await self.execute_confirmed(
+                    intent,
+                    settlement_attempts=settlement_attempts,
+                    settlement_delay=settlement_delay,
+                )
+            )
+        return recovered
+
     async def reconcile(self, intent: OrderIntent) -> OrderIntent:
         order = await self.adapter.fetch_order_by_cloid(intent.symbol, intent.cloid)
         if order is None:
             orders = await self.adapter.fetch_open_orders(intent.symbol)
-            order = next((item for item in orders if _cloid(item) == intent.cloid), None)
+            order = next(
+                (item for item in orders if _cloid(item) == intent.cloid), None
+            )
 
         fills = await self.adapter.fetch_fills(intent.symbol)
         matching = [fill for fill in fills if _cloid(fill) == intent.cloid]
         if matching:
-            filled = sum(float(fill.get("amount") or fill.get("filled") or 0) for fill in matching)
+            filled = sum(
+                float(fill.get("amount") or fill.get("filled") or 0)
+                for fill in matching
+            )
             status = (
                 OrderStatus.FILLED
                 if filled >= intent.amount
+                or math.isclose(filled, intent.amount, rel_tol=1e-9, abs_tol=1e-12)
                 else OrderStatus.PARTIALLY_FILLED
             )
             return self.store.transition(intent.intent_id, status, filled=filled)
@@ -373,7 +455,17 @@ class IdempotentOrderExecutor:
             "rejected": OrderStatus.REJECTED,
         }
         status = status_map.get(raw_status, OrderStatus.UNKNOWN)
-        if status is OrderStatus.OPEN and filled > 0:
+        if raw_status.endswith("rejected"):
+            status = OrderStatus.REJECTED
+        elif raw_status.endswith("canceled") or raw_status.endswith("cancelled"):
+            status = OrderStatus.CANCELLED
+        if (
+            status is OrderStatus.FILLED
+            and filled < intent.amount
+            and not math.isclose(filled, intent.amount, rel_tol=1e-9, abs_tol=1e-12)
+        ):
+            status = OrderStatus.PARTIALLY_FILLED if filled > 0 else OrderStatus.UNKNOWN
+        elif status is OrderStatus.OPEN and filled > 0:
             status = OrderStatus.PARTIALLY_FILLED
         return self.store.transition(
             intent.intent_id,

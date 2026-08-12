@@ -25,6 +25,7 @@ from crypto_spot_collector.exchange.types import PositionSide
 from crypto_spot_collector.notification.discord import discordNotification
 from crypto_spot_collector.providers.market_data_provider import MarketDataProvider
 from crypto_spot_collector.trading.config import SignalMode, TradingConfig
+from crypto_spot_collector.trading.execution import PositionExecutionCoordinator
 from crypto_spot_collector.trading.order_state import (
     IdempotentOrderExecutor,
     OrderStatus,
@@ -176,6 +177,13 @@ protection_reconciler = ProtectionReconciler(
     take_profit_roe=trading_config.take_profit_roe,
     stop_loss_roe=trading_config.stop_loss_roe,
     leverage=trading_config.leverage,
+)
+execution_coordinator = PositionExecutionCoordinator(
+    hyperliquid_exchange,
+    order_executor,
+    protection_reconciler,
+    expected_leverage=trading_config.leverage,
+    expected_margin_mode=trading_config.margin_mode,
 )
 
 
@@ -878,45 +886,40 @@ async def check_signal(
         )
         contracts = abs(float(current_position.get("contracts") or 0))
         close_side = "sell" if current_position_side == "long" else "buy"
+        prepared_close = await hyperliquid_exchange.prepare_market_order(
+            symbol,
+            contracts,
+            reference_price=float(current_position.get("markPrice") or 0) or None,
+        )
         close_intent = create_intent(
             strategy="sar-close-v1",
             symbol=symbol,
             timeframe=timeframe,
             candle_open_ms=candle_identity.open_time_ms,
             side=close_side,
-            amount=contracts,
+            amount=prepared_close.amount,
             reduce_only=True,
         )
-        close_state = await order_executor.execute(close_intent)
-
-        # Only a confirmed full fill is treated as a successful close. Open,
-        # partial and unknown outcomes remain in the durable intent store and
-        # inhibit a reverse entry until a later exchange-truth reconciliation.
-        if close_state.status is OrderStatus.FILLED:
-            closed_positions = [
-                {
-                    "id": close_state.order_id or close_state.cloid,
-                    "symbol": symbol,
-                    "side": close_side,
-                    "amount": close_state.filled or contracts,
-                    "price": current_position.get("markPrice") or 0.0,
-                }
-            ]
-            trailing_manager.remove_position(symbol=symbol)
-            await send_close_position_notification(
-                symbol=symbol,
-                closed_positions=closed_positions,
-                reason=f"Consecutive opposite SAR ({sar_close_consecutive_count}x): position={current_position_side}, SAR={current_sar_direction}",
-                timeframe=timeframe,
-            )
-            # Close and reverse is intentionally two phase. A later pass must
-            # re-fetch the exchange position and observe it as flat before a
-            # reverse entry can be created.
-            return
-        logger.error(
-            f"{symbol}: SAR close intent {close_state.cloid} is "
-            f"{close_state.status.value}; reverse entry remains inhibited"
+        close_state = await execution_coordinator.execute_close(close_intent)
+        closed_positions = [
+            {
+                "id": close_state.order_id or close_state.cloid,
+                "symbol": symbol,
+                "side": close_side,
+                "amount": close_state.filled or prepared_close.amount,
+                "price": current_position.get("markPrice") or 0.0,
+            }
+        ]
+        trailing_manager.remove_position(symbol=symbol)
+        await send_close_position_notification(
+            symbol=symbol,
+            closed_positions=closed_positions,
+            reason=f"Consecutive opposite SAR ({sar_close_consecutive_count}x): position={current_position_side}, SAR={current_sar_direction}",
+            timeframe=timeframe,
         )
+        # Close and reverse is intentionally two phase. A later pass must
+        # re-fetch the exchange position and observe it as flat before a
+        # reverse entry can be created.
         return
 
     if trading_config.signal_mode is SignalMode.SAR_ONLY:
@@ -974,11 +977,7 @@ async def execute_long_order(
     amountByUSDC: float,
     reason: str = "",
 ) -> None:
-    """ロングオーダーを発注する。
-
-    同じ方向に追加注文する場合は、既存のTP/SL注文をキャンセルしてから
-    新規注文を発注し、トレーリングストップの状態を引き継ぐ。
-    """
+    """Place a long entry and do not return until exchange protection is proven."""
     logger.info(f"{symbol}: Long signal detected! Placing long order...")
     logger.info(f"{symbol}: Reason: {reason}")
 
@@ -988,7 +987,12 @@ async def execute_long_order(
         current_price = ticker["last"]
 
         # 注文数量を計算
-        amount = amountByUSDC / current_price
+        prepared = await hyperliquid_exchange.prepare_market_order(
+            symbol,
+            amountByUSDC / current_price,
+            reference_price=current_price,
+        )
+        amount = prepared.amount
 
         candle_open_ms = int(
             pd.to_datetime(df.iloc[-1]["timestamp"], utc=True).timestamp() * 1000
@@ -1001,14 +1005,15 @@ async def execute_long_order(
             side="buy",
             amount=amount,
         )
-        order_state = await order_executor.execute(intent)
-        if order_state.status in {OrderStatus.UNKNOWN, OrderStatus.REJECTED}:
-            raise RuntimeError(
-                f"order intent {order_state.cloid} ended as {order_state.status.value}: "
-                f"{order_state.error}"
-            )
+        receipt = await execution_coordinator.execute_entry(
+            intent,
+            expected_side="long",
+        )
+        order_state = receipt.order
+        current_price = float(receipt.position.get("entryPrice") or 0)
+        amount = abs(float(receipt.position.get("contracts") or 0))
         order_result = {"id": order_state.order_id or order_state.cloid}
-        logger.success(f"Successfully created long order for {symbol}")
+        logger.success(f"Created and protected long position for {symbol}")
 
         # トレーリングストップ管理の更新
         # 既存ポジションがあればトレーリング状態を引き継ぎ、オーダーIDのみ更新
@@ -1074,11 +1079,7 @@ async def execute_short_order(
     amountByUSDC: float,
     reason: str = "",
 ) -> None:
-    """ショートオーダーを発注する。
-
-    同じ方向に追加注文する場合は、既存のTP/SL注文をキャンセルしてから
-    新規注文を発注し、トレーリングストップの状態を引き継ぐ。
-    """
+    """Place a short entry and do not return until exchange protection is proven."""
     logger.info(f"{symbol}: Short signal detected! Placing short order...")
     logger.info(f"{symbol}: Reason: {reason}")
 
@@ -1088,7 +1089,12 @@ async def execute_short_order(
         current_price = ticker["last"]
 
         # 注文数量を計算
-        amount = amountByUSDC / current_price
+        prepared = await hyperliquid_exchange.prepare_market_order(
+            symbol,
+            amountByUSDC / current_price,
+            reference_price=current_price,
+        )
+        amount = prepared.amount
 
         candle_open_ms = int(
             pd.to_datetime(df.iloc[-1]["timestamp"], utc=True).timestamp() * 1000
@@ -1101,14 +1107,15 @@ async def execute_short_order(
             side="sell",
             amount=amount,
         )
-        order_state = await order_executor.execute(intent)
-        if order_state.status in {OrderStatus.UNKNOWN, OrderStatus.REJECTED}:
-            raise RuntimeError(
-                f"order intent {order_state.cloid} ended as {order_state.status.value}: "
-                f"{order_state.error}"
-            )
+        receipt = await execution_coordinator.execute_entry(
+            intent,
+            expected_side="short",
+        )
+        order_state = receipt.order
+        current_price = float(receipt.position.get("entryPrice") or 0)
+        amount = abs(float(receipt.position.get("contracts") or 0))
         order_result = {"id": order_state.order_id or order_state.cloid}
-        logger.success(f"Successfully created short order for {symbol}")
+        logger.success(f"Created and protected short position for {symbol}")
 
         # トレーリングストップ管理の更新
         # 既存ポジションがあればトレーリング状態を引き継ぎ、オーダーIDのみ更新
@@ -1451,6 +1458,19 @@ async def main() -> None:
     supervisor.install_signal_handlers()
 
     try:
+        recovered_orders = await order_executor.recover_unsettled()
+        unresolved = [
+            order
+            for order in recovered_orders
+            if order.status
+            not in {OrderStatus.FILLED, OrderStatus.CANCELLED, OrderStatus.REJECTED}
+        ]
+        if unresolved:
+            raise RuntimeError(
+                "startup is inhibited by unresolved order intent(s): "
+                + ", ".join(order.cloid for order in unresolved)
+            )
+
         # 起動時にTrailingManagerを初期化（既存ポジションを取得）
         await initialize_trailing_manager()
 

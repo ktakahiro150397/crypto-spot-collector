@@ -21,6 +21,7 @@
             "signal_mode": "sar_only",
             "timeframe": "30m",
             "leverage": 20,
+            "margin_mode": "cross",
             "take_profit_rate": 3.0,
             "stop_loss_rate": 0.2,
             "amountByUSDC": 200.0,

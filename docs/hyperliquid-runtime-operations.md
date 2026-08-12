@@ -35,6 +35,32 @@
   count are stored in the runtime SQLite database. Restarting cannot count the
   same candle twice; an aligned SAR or a flat position resets the counter.
 
+## Order and protection contract
+
+- `margin_mode` is explicitly `cross` or `isolated`. Before every entry the
+  configured mode and leverage are submitted to Hyperliquid and the exchange
+  acknowledgement is required. The resulting live position must report the
+  same values.
+- Amount and reference price are normalized to market precision. Orders below
+  the live amount minimum or the 10 USDC Hyperliquid perp minimum are rejected
+  before submission.
+- Entry, SAR close, and an unprotected-position emergency close all use the
+  durable `IdempotentOrderExecutor`. Only a full fill is successful; open,
+  partial, rejected, cancelled, statusless and timed-out states inhibit the
+  strategy transition.
+- A close must also produce a flat exchange position before a later cycle may
+  reverse. An entry must expose its actual side, average price, contracts,
+  leverage and margin mode, then pass TP/SL reconciliation on both sides.
+- TP/SL prices express ROE percentages: price distance is
+  `(configured_roe / 100) / actual_leverage`. Replacement protection is
+  created and verified before stale protection is cancelled.
+- If entry protection or account settings cannot be verified, new signals are
+  inhibited and a deterministic reduce-only emergency close is attempted. A
+  failure to prove that close is fatal and leaves the durable intent blocking
+  future orders for the symbol.
+- Startup reconciles every non-terminal SQLite intent before strategy workers
+  start. Unknown or otherwise unresolved state prevents startup.
+
 ## REST policy
 
 - Read-only calls use a 15-second timeout, at most four attempts, exponential

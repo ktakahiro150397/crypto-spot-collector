@@ -1,4 +1,3 @@
-from pathlib import Path
 from typing import Any, Sequence
 
 import pytest
@@ -41,9 +40,11 @@ class FakeProtectionAdapter:
             "triggerPrice": spec.trigger_price,
             "reduceOnly": True,
             "info": {
-                "orderType": "Take Profit Market"
-                if spec.kind == "take_profit"
-                else "Stop Market"
+                "orderType": (
+                    "Take Profit Market"
+                    if spec.kind == "take_profit"
+                    else "Stop Market"
+                )
             },
         }
         self.orders.append(order)
@@ -54,7 +55,9 @@ class FakeProtectionAdapter:
     ) -> None:
         self.cancelled.extend(order_ids)
         ids = set(order_ids)
-        self.orders = [order for order in self.orders if str(order.get("id")) not in ids]
+        self.orders = [
+            order for order in self.orders if str(order.get("id")) not in ids
+        ]
 
 
 def reconciler(adapter: FakeProtectionAdapter) -> ProtectionReconciler:
@@ -176,7 +179,7 @@ async def test_actual_position_leverage_drives_protection_prices() -> None:
     adapter.positions = [actual]
     await reconciler(adapter).reconcile_symbol("BTC/USDC:USDC")
     take_profit = next(spec for spec in adapter.created if spec.kind == "take_profit")
-    assert take_profit.trigger_price == 130
+    assert take_profit.trigger_price == pytest.approx(100.3)
 
 
 @pytest.mark.asyncio
@@ -187,14 +190,14 @@ async def test_exchange_price_rounding_is_accepted_during_verification() -> None
         {
             "id": "rounded-tp",
             "amount": 2,
-            "triggerPrice": 115.0004,
+            "triggerPrice": 100.1504,
             "reduceOnly": True,
             "info": {"orderType": "Take Profit Market"},
         },
         {
             "id": "rounded-sl",
             "amount": 2,
-            "triggerPrice": 99.0004,
+            "triggerPrice": 99.9904,
             "reduceOnly": True,
             "info": {"orderType": "Stop Market"},
         },

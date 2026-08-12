@@ -76,9 +76,7 @@ class ProtectionReconciler:
         positions = await self.adapter.fetch_positions()
         reports: list[ProtectionReport] = []
         for symbol in symbols:
-            reports.append(
-                await self.reconcile_symbol(symbol, positions=positions)
-            )
+            reports.append(await self.reconcile_symbol(symbol, positions=positions))
         return reports
 
     async def reconcile_symbol(
@@ -88,11 +86,14 @@ class ProtectionReconciler:
         positions: Sequence[dict[str, Any]] | None = None,
         trailing_stop: float | None = None,
     ) -> ProtectionReport:
-        actual_positions = positions if positions is not None else await self.adapter.fetch_positions()
+        actual_positions = (
+            positions if positions is not None else await self.adapter.fetch_positions()
+        )
         matching_positions = [
             item
             for item in actual_positions
-            if item.get("symbol") == symbol and abs(float(item.get("contracts") or 0)) > 0
+            if item.get("symbol") == symbol
+            and abs(float(item.get("contracts") or 0)) > 0
         ]
         if len(matching_positions) > 1:
             raise ProtectionError(f"multiple non-zero positions returned for {symbol}")
@@ -106,7 +107,9 @@ class ProtectionReconciler:
         protection_orders = [order for order in orders if _kind(order) is not None]
 
         if position is None:
-            orphan_ids = [str(order["id"]) for order in protection_orders if order.get("id")]
+            orphan_ids = [
+                str(order["id"]) for order in protection_orders if order.get("id")
+            ]
             if orphan_ids:
                 await self.adapter.cancel_protection_orders(symbol, orphan_ids)
             return ProtectionReport(
@@ -123,9 +126,7 @@ class ProtectionReconciler:
         stop_spec = next(spec for spec in desired if spec.kind == "stop_loss")
         stop_is_breached = (
             position.side == "long" and last_price <= stop_spec.trigger_price
-        ) or (
-            position.side == "short" and last_price >= stop_spec.trigger_price
-        )
+        ) or (position.side == "short" and last_price >= stop_spec.trigger_price)
         if stop_is_breached:
             raise ProtectionError(
                 f"configured stop for {symbol} is already breached; "
@@ -138,9 +139,9 @@ class ProtectionReconciler:
                 (
                     order
                     for order in protection_orders
-                    if _matches(order, spec) and str(order.get("id")) not in {
-                        str(item.get("id")) for item in retained.values()
-                    }
+                    if _matches(order, spec)
+                    and str(order.get("id"))
+                    not in {str(item.get("id")) for item in retained.values()}
                 ),
                 None,
             )
@@ -197,10 +198,10 @@ class ProtectionReconciler:
         direction = 1 if is_long else -1
         leverage = position.leverage or float(self.leverage)
         take_profit = position.entry_price * (
-            1 + direction * self.take_profit_roe / leverage
+            1 + direction * (self.take_profit_roe / 100) / leverage
         )
         stop_loss = position.entry_price * (
-            1 - direction * self.stop_loss_roe / leverage
+            1 - direction * (self.stop_loss_roe / 100) / leverage
         )
         current_stops = [
             _trigger(order) for order in current_orders if _kind(order) == "stop_loss"
@@ -279,6 +280,8 @@ def _matches(order: dict[str, Any], spec: ProtectionSpec) -> bool:
         # HyperLiquid rounds trigger prices to the market's significant-digit
         # precision. Accept that exchange-normalized value when verifying the
         # pair, while still rejecting a materially different protection level.
-        and math.isclose(_trigger(order), spec.trigger_price, rel_tol=5e-5, abs_tol=1e-10)
+        and math.isclose(
+            _trigger(order), spec.trigger_price, rel_tol=5e-5, abs_tol=1e-10
+        )
         and bool(order.get("reduceOnly", order.get("info", {}).get("reduceOnly", True)))
     )

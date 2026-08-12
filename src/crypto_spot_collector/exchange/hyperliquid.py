@@ -1,3 +1,4 @@
+import math
 from dataclasses import dataclass
 from datetime import datetime
 from types import TracebackType
@@ -39,6 +40,12 @@ class HyperliquidTakeProfitStopLossPositionInfo:
     stop_loss_order_id: str
     take_profit_trigger_price: float
     stop_loss_trigger_price: float
+
+
+@dataclass(frozen=True)
+class PreparedMarketOrder:
+    amount: float
+    reference_price: float
 
 
 class HyperLiquidExchange(IExchange):
@@ -91,8 +98,8 @@ class HyperLiquidExchange(IExchange):
 
         logger.info(
             f"HyperLiquid exchange client initialized successfully. "
-            f"Take Profit Rate: {self.take_profit_rate * 100:.2f}%, "
-            f"Stop Loss Rate: {self.stop_loss_rate * 100:.2f}%, "
+            f"Take Profit ROE: {self.take_profit_rate:.2f}%, "
+            f"Stop Loss ROE: {self.stop_loss_rate:.2f}%, "
             f"Leverage: x{self.leverage}, "
             f"Network: {'testnet' if testnet else 'mainnet'}"
         )
@@ -165,28 +172,22 @@ class HyperLiquidExchange(IExchange):
         """Submit an intent using its deterministic Hyperliquid cloid."""
         ticker = await self.fetch_price_async(intent.symbol)
         market_price = float(ticker["last"])
+        prepared = await self.prepare_market_order(
+            intent.symbol,
+            intent.amount,
+            reference_price=market_price,
+        )
+        if not math.isclose(prepared.amount, intent.amount, rel_tol=1e-12):
+            raise ValueError(
+                f"intent amount {intent.amount} is not normalized for "
+                f"{intent.symbol}; expected {prepared.amount}"
+            )
+        if not intent.reduce_only:
+            await self.ensure_market_configuration(intent.symbol)
         params: dict[str, Any] = {
             "clientOrderId": intent.cloid,
             "reduceOnly": intent.reduce_only,
         }
-        if not intent.reduce_only:
-            is_long = intent.side == "buy"
-            tp_multiplier = 1 if is_long else -1
-            sl_multiplier = -1 if is_long else 1
-            params.update(
-                {
-                    "stopLoss": {
-                        "type": "market",
-                        "triggerPrice": market_price
-                        * (1 + sl_multiplier * self.stop_loss_rate / self.leverage),
-                    },
-                    "takeProfit": {
-                        "type": "market",
-                        "triggerPrice": market_price
-                        * (1 + tp_multiplier * self.take_profit_rate / self.leverage),
-                    },
-                }
-            )
         result = await self.rest.call(
             "submit_market_order",
             lambda: self.exchange_private.create_order(
@@ -194,12 +195,103 @@ class HyperLiquidExchange(IExchange):
                 type="market",
                 side=intent.side,
                 amount=intent.amount,
-                price=market_price,
+                price=prepared.reference_price,
                 params=params,
             ),
             policy=WRITE_POLICY,
         )
         return dict(result)
+
+    async def prepare_market_order(
+        self,
+        symbol: str,
+        amount: float,
+        *,
+        reference_price: float | None = None,
+    ) -> PreparedMarketOrder:
+        """Normalize amount/price and enforce exchange market limits."""
+
+        await self.rest.call(
+            "load_markets",
+            lambda: self.exchange_private.load_markets(),
+        )
+        market = self.exchange_private.market(symbol)
+        if reference_price is None:
+            reference_price = await self.fetch_last_price(symbol)
+        reference_price = float(reference_price)
+        if not math.isfinite(reference_price) or reference_price <= 0:
+            raise ValueError(f"invalid reference price for {symbol}")
+        requested_amount = abs(float(amount))
+        if not math.isfinite(requested_amount) or requested_amount <= 0:
+            raise ValueError(f"invalid order amount for {symbol}")
+        normalized_amount = float(
+            self.exchange_private.amount_to_precision(symbol, requested_amount)
+        )
+        normalized_price = float(
+            self.exchange_private.price_to_precision(symbol, reference_price)
+        )
+        if (
+            not math.isfinite(normalized_amount)
+            or not math.isfinite(normalized_price)
+            or normalized_amount <= 0
+            or normalized_price <= 0
+        ):
+            raise ValueError(f"order for {symbol} rounds to zero")
+
+        limits = market.get("limits", {})
+        minimum_amount = float((limits.get("amount", {}) or {}).get("min") or 0)
+        # Hyperliquid's documented perp minimum is $10. Prefer stricter live
+        # metadata when CCXT exposes one.
+        minimum_cost = max(
+            10.0,
+            float((limits.get("cost", {}) or {}).get("min") or 0),
+        )
+        notional = normalized_amount * normalized_price
+        if minimum_amount and normalized_amount < minimum_amount:
+            raise ValueError(
+                f"order amount {normalized_amount} is below {symbol} minimum "
+                f"{minimum_amount}"
+            )
+        if notional < minimum_cost:
+            raise ValueError(
+                f"order notional {notional:.8f} is below {symbol} minimum "
+                f"{minimum_cost:.8f}"
+            )
+        return PreparedMarketOrder(
+            amount=normalized_amount,
+            reference_price=normalized_price,
+        )
+
+    async def ensure_market_configuration(self, symbol: str) -> None:
+        """Set and verify the configured leverage/margin mode before entry."""
+
+        await self.rest.call(
+            "load_markets",
+            lambda: self.exchange_private.load_markets(),
+        )
+        market = self.exchange_private.market(symbol)
+        leverage_limits = market.get("limits", {}).get("leverage", {}) or {}
+        market_max_leverage = float(
+            leverage_limits.get("max") or market.get("info", {}).get("maxLeverage") or 0
+        )
+        if market_max_leverage and self.leverage > market_max_leverage:
+            raise ValueError(
+                f"configured leverage {self.leverage} exceeds {symbol} maximum "
+                f"{market_max_leverage:g}"
+            )
+        response = await self.rest.call(
+            "set_leverage",
+            lambda: self.exchange_private.set_leverage(
+                self.leverage,
+                symbol,
+                {"marginMode": self.trading_config.margin_mode},
+            ),
+            policy=WRITE_POLICY,
+        )
+        if not isinstance(response, dict) or response.get("status") != "ok":
+            raise RuntimeError(
+                f"exchange did not acknowledge leverage/margin mode for {symbol}"
+            )
 
     async def fetch_order_by_cloid(
         self, symbol: str, cloid: str
@@ -238,6 +330,23 @@ class HyperLiquidExchange(IExchange):
         )
 
     async def create_protection_order(self, spec: ProtectionSpec) -> dict[str, Any]:
+        await self.rest.call(
+            "load_markets",
+            lambda: self.exchange_private.load_markets(),
+        )
+        normalized_amount = float(
+            self.exchange_private.amount_to_precision(spec.symbol, spec.amount)
+        )
+        normalized_trigger = float(
+            self.exchange_private.price_to_precision(spec.symbol, spec.trigger_price)
+        )
+        if (
+            not math.isfinite(normalized_amount)
+            or not math.isfinite(normalized_trigger)
+            or normalized_amount <= 0
+            or normalized_trigger <= 0
+        ):
+            raise ValueError(f"protection order for {spec.symbol} rounds to zero")
         price_key = "takeProfitPrice" if spec.kind == "take_profit" else "stopLossPrice"
         result = await self.rest.call(
             "create_protection_order",
@@ -245,10 +354,10 @@ class HyperLiquidExchange(IExchange):
                 symbol=spec.symbol,
                 type="market",
                 side=spec.side,
-                amount=spec.amount,
-                price=spec.trigger_price,
+                amount=normalized_amount,
+                price=normalized_trigger,
                 params={
-                    price_key: spec.trigger_price,
+                    price_key: normalized_trigger,
                     "reduceOnly": True,
                     "clientOrderId": spec.cloid,
                 },

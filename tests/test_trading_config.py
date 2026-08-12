@@ -96,3 +96,13 @@ def test_signal_mode_is_explicit_and_exclusive() -> None:
         TradingConfig.from_mapping(
             {"perpetual": {"signal_mode": "sar_or_price"}}, symbols=SYMBOLS
         )
+
+
+def test_margin_mode_is_explicit_and_validated() -> None:
+    config = TradingConfig.from_mapping(
+        {"perpetual": {"margin_mode": "isolated"}}, symbols=SYMBOLS
+    )
+    assert config.margin_mode == "isolated"
+
+    with pytest.raises(ValueError, match="margin_mode"):
+        valid_config(margin_mode="portfolio").validate()

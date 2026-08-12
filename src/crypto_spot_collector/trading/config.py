@@ -41,6 +41,7 @@ class TradingConfig:
     sar_close_consecutive_count: int
     price_change_threshold_percent: float
     signal_mode: SignalMode = SignalMode.SAR_ONLY
+    margin_mode: str = "cross"
     network: Network = Network.TESTNET
     allow_mainnet: bool = False
     mainnet_confirmation: str = ""
@@ -80,6 +81,8 @@ class TradingConfig:
             errors.append("price_change_threshold_percent must be greater than zero")
         if self.signal_mode not in {SignalMode.SAR_ONLY, SignalMode.PRICE_CHANGE_ONLY}:
             errors.append("unsupported signal mode")
+        if self.margin_mode not in {"cross", "isolated"}:
+            errors.append("margin_mode must be cross or isolated")
         if self.network is Network.MAINNET:
             if not self.allow_mainnet:
                 errors.append("mainnet requires allow_mainnet=true")
@@ -138,6 +141,7 @@ class TradingConfig:
                 perpetual.get("price_change_threshold_percent", 0.5)
             ),
             signal_mode=signal_mode,
+            margin_mode=str(perpetual.get("margin_mode", "cross")).lower(),
             network=network,
             allow_mainnet=bool(settings.get("allow_mainnet", False)),
             mainnet_confirmation=mainnet_confirmation,

@@ -125,39 +125,34 @@ flowchart LR
 
 ### 5.3 エントリー条件
 
-ロング・ショートはそれぞれ次の OR 条件で成立する (`buy_perp.py:310-448`)。
+本番設定は `signal_mode=sar_only` であり、SARと価格変化は排他的なモードとして選択する。暗黙の OR 条件は使用しない。
 
 - SAR 方向転換条件: 最新側の指定本数が PSAR の同一方向条件を満たす。現在は `consecutivePositiveCount=4`。
 - 価格変化条件: `前の足の open` から `最新足の close` までを `(latest_close - previous_open) / previous_open * 100` で計算。ロングは閾値以上、ショートは負の閾値以下。現在の閾値 `999` では通常成立しない。
 
-現在ポジションと同方向か、反対方向か、すでに注文処理中かを判定するエントリーガードはない。シグナルが継続すれば 30 分ごとに追加注文し得る。また、SAR 決済要求の直後にも同じ評価内で新規エントリー判定を続行する (`buy_perp.py:904-958`)。
+確定済みの最新足だけを1回評価し、すでに position がある場合や同一symbolに未確定の永続注文intentがある場合は新規entryを禁止する。SAR決済とreverseは別サイクルで行い、取引所でflatを確認するまでreverseしない。
 
 ### 5.4 注文数量、TP、SL
 
-- 注文数量は `amountByUSDC / ticker.last`。現在値なら約 200 USDC の建玉想定数量である (`buy_perp.py:976-1002`, `buy_perp.py:1074-1100`)。
-- 発注直前に、その銘柄で検出できた既存 TP/SL を両方キャンセルする。
-- その後、成行エントリーに attached TP/SL を付けて CCXT へ送る。
-- 呼び出し側が渡した価格は exchange 層で使わず、ticker を再取得してトリガー価格を計算する (`hyperliquid.py:169-257`)。
+- 注文数量は `amountByUSDC / ticker.last` を出発点とし、発注前にmarketのamount/price precisionへ丸め、amount minimumとHyperliquidの10 USDC minimum notionalを検証する。
+- entry前に設定されたcross/isolated margin modeとleverageをexchangeへ設定し、応答を検証する。entry後は実positionの値とも照合する。
+- 決定的な128-bit `cloid`を持つ永続intentを送信し、fill ledger・order・positionを照合する。OPEN、PARTIALLY_FILLED、UNKNOWN、REJECTED、timeoutは成功扱いしない。
+- full fill後に実平均価格・実数量・実leverageを取得し、その値からTP/SLを作成する。両側が取引所で確認できるまでentry処理を成功にしない。
 
 現行のトリガー式は以下。
 
 | side | TP | SL |
 | --- | --- | --- |
-| long | `market × (1 + take_profit_rate / leverage)` | `market × (1 - stop_loss_rate / leverage)` |
-| short | `market × (1 - take_profit_rate / leverage)` | `market × (1 + stop_loss_rate / leverage)` |
+| long | `actual_entry × (1 + (take_profit_roe / 100) / actual_leverage)` | `actual_entry × (1 - (stop_loss_roe / 100) / actual_leverage)` |
+| short | `actual_entry × (1 - (take_profit_roe / 100) / actual_leverage)` | `actual_entry × (1 + (stop_loss_roe / 100) / actual_leverage)` |
 
-現在値では価格差が TP `15%`、SL `1%` になる。`rate` を百分率へ直す `/100` はない。さらにコードは `set_leverage` や margin mode 設定を呼ばないため、取引所の実レバレッジが 20 である保証もない。仮に実レバレッジが 20 なら、手数料・funding・slippage を除く単純な価格差×レバレッジは TP 約 300%、SL 約 20% に相当する。設定名と実際のリスク契約を確定する必要がある。
+現在値（TP ROE 3%、SL ROE 0.2%、20x）なら、価格差はTP 0.15%、SL 0.01%となる。保護注文はexchange precisionへ丸め、既存注文を消す前に置換ペアを作成・検証する。保護を確認できない場合は新規signalを停止し、同じ永続注文経路でreduce-only緊急決済を行う。
 
-注文には client order id (`cloid`) がなく、再試行キー、注文状態照会、約定確認もない。タイムアウト等で応答が不明な場合に「未発注」と「発注済み」を区別できない。
+再起動時はSQLiteのPREPARED/SUBMITTING/OPEN/PARTIALLY_FILLED/UNKNOWN intentを先に再照合する。未確定intentが残るsymbolには別の注文を発行しない。
 
 ### 5.5 反対 SAR による決済
 
-ポジションと逆向きの SAR を評価ごとにメモリで数え、現在は 2 回連続で reduce-only 成行決済を要求する (`buy_perp.py:856-925`)。ただし次が未保証である。
-
-- 決済の fill 完了や残数量を確認しない。
-- カウンタは再起動で消える。
-- 決済要求後に同じ処理で新規エントリーへ進む。
-- 既存 TP/SL の残留や競合を最終照合しない。
+ポジションと逆向きの確定足SARをSQLiteで数え、現在は2回連続でreduce-only成行決済を要求する。決済もentryと同じcloid付き状態機械を通し、full fill、取引所のflat、孤立TP/SLの削除まで確認する。決済を要求したサイクルでは新規entryへ進まず、restart後も同じ足を再カウントしない。
 
 ### 5.6 TP/SL 再作成とトレーリング
 
@@ -169,7 +164,7 @@ flowchart LR
 
 long の SL は上方向、short の SL は下方向にしか更新しない。各 3 分サイクルと起動時には取引所スナップショットを正とし、side・entry・contracts が一致する間だけ高値/安値/AFを引き継ぐ。反転、平均建値変更、部分決済または追加約定による数量変更ではパス状態をリセットする。外部決済で消えたポジションはローカル状態からも削除する。再起動時は現在の position と TP/SL から再構築し、取引所上の既存 SL より保護を弱めない。
 
-取引所側の TP/SL 更新は、既存 TP と SL を先に両方キャンセルし、2 件を batch で再作成する (`hyperliquid.py:408-460`)。途中失敗時の rollback、片方だけ成功した場合の補修、再作成後の一意性確認がない。
+取引所側のTP/SL更新は、必要な置換注文を先に作成して両側を再取得・検証し、その後で重複・古い注文だけをキャンセルする。片側作成失敗時は既存保護を残し、entry直後に完全なペアを証明できない場合はreduce-only緊急決済へ移る。
 
 高値・安値と AF 自体は取引所に保存されないため、プロセス再起動時は entry から初期化する。一方、現在 SL とトレーリング開始済みかどうかは取引所の保護注文から復元するので、再起動によって SL が後退することはない。
 
