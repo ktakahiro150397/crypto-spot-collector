@@ -143,25 +143,21 @@ trading_config = TradingConfig.from_mapping(
     mainnet_confirmation=os.getenv("HYPERLIQUID_MAINNET_CONFIRMATION", ""),
 )
 
-notificator = discordNotification(
-    secrets["discord"]["discordWebhookUrlPerpetual"])
+notificator = discordNotification(secrets["discord"]["discordWebhookUrlPerpetual"])
 importer = HistoricalDataImporter()
 logger.info("Discord notification and historical data importer initialized")
 
-is_testnet = trading_config.testnet
 hyperliquid_exchange = HyperLiquidExchange(
     mainWalletAddress=secrets["hyperliquid"]["mainWalletAddress"],
     apiWalletAddress=secrets["hyperliquid"]["apiWalletAddress"],
     privateKey=secrets["hyperliquid"]["privatekey"],
-    take_profit_rate=secrets["settings"]["perpetual"]["take_profit_rate"],
-    stop_loss_rate=secrets["settings"]["perpetual"]["stop_loss_rate"],
-    leverage=secrets["settings"]["perpetual"]["leverage"],
-    testnet=is_testnet,
+    trading_config=trading_config,
 )
 logger.info("HyperLiquid exchange client initialized")
 
 sar_checker = SARChecker(
-    consecutive_count=secrets["settings"]["perpetual"]["consecutivePositiveCount"])
+    consecutive_count=secrets["settings"]["perpetual"]["consecutivePositiveCount"]
+)
 
 # SAR direction tracking per symbol
 # Key: symbol (e.g., "XRP/USDC:USDC"), Value: SAR direction ("long", "short", or None)
@@ -216,25 +212,26 @@ async def initialize_trailing_manager() -> None:
 
         initialized_count = 0
         for pos in all_positions:
-            contracts = pos.get('contracts', 0)
+            contracts = pos.get("contracts", 0)
             if not contracts or float(contracts) == 0:
                 continue
 
-            symbol = pos.get('symbol')
+            symbol = pos.get("symbol")
             if symbol not in perp_symbols:
                 logger.debug(f"Skipping {symbol} (not in monitoring list)")
                 continue
 
-            position_side_str = pos.get('side')  # 'long' or 'short'
-            entry_price = float(pos.get('entryPrice', 0))
+            position_side_str = pos.get("side")  # 'long' or 'short'
+            entry_price = float(pos.get("entryPrice", 0))
 
-            if position_side_str == 'long':
+            if position_side_str == "long":
                 position_side = PositionSide.LONG
-            elif position_side_str == 'short':
+            elif position_side_str == "short":
                 position_side = PositionSide.SHORT
             else:
                 logger.warning(
-                    f"Unknown position side '{position_side_str}' for {symbol}")
+                    f"Unknown position side '{position_side_str}' for {symbol}"
+                )
                 continue
 
             # TP/SL注文情報を取得
@@ -276,8 +273,7 @@ async def initialize_trailing_manager() -> None:
                 )
 
             except Exception as e:
-                logger.error(
-                    f"Failed to initialize TrailingManager for {symbol}: {e}")
+                logger.error(f"Failed to initialize TrailingManager for {symbol}: {e}")
                 continue
 
         logger.info(
@@ -295,24 +291,25 @@ async def initialize_trailing_manager() -> None:
 async def sync_trailing_position(positions: list[Position]) -> None:
     try:
         logger.debug(
-            "Synchronizing TrailingManager positions with current Hyperliquid order state...")
+            "Synchronizing TrailingManager positions with current Hyperliquid order state..."
+        )
 
         synced_count = 0
         for pos in positions:
-            contracts = pos.get('contracts', 0)
+            contracts = pos.get("contracts", 0)
             if not contracts or float(contracts) == 0:
                 continue
 
-            symbol = pos.get('symbol')
+            symbol = pos.get("symbol")
             if symbol not in perp_symbols:
                 continue
 
-            position_side_str = pos.get('side')  # 'long' or 'short'
-            entry_price = float(pos.get('entryPrice', 0))
+            position_side_str = pos.get("side")  # 'long' or 'short'
+            entry_price = float(pos.get("entryPrice", 0))
 
-            if position_side_str == 'long':
+            if position_side_str == "long":
                 position_side = PositionSide.LONG
-            elif position_side_str == 'short':
+            elif position_side_str == "short":
                 position_side = PositionSide.SHORT
             else:
                 continue
@@ -321,7 +318,8 @@ async def sync_trailing_position(positions: list[Position]) -> None:
             tp_sl_info = await hyperliquid_exchange.fetch_tp_sl_info(symbol=symbol)
             if tp_sl_info is None:
                 logger.warning(
-                    f"No TP/SL orders found for {symbol}, remove Trailing Stop Position.")
+                    f"No TP/SL orders found for {symbol}, remove Trailing Stop Position."
+                )
                 trailing_manager.remove_position(symbol=symbol)
                 continue
 
@@ -507,9 +505,11 @@ async def trailing_stop_loop() -> None:
     """
     # 設定から間隔と有効化PnL閾値を取得
     interval_minutes = secrets["settings"]["perpetual"].get(
-        "trailing_stop_interval_minutes", 15)
+        "trailing_stop_interval_minutes", 15
+    )
     activation_pnl_percent = secrets["settings"]["perpetual"].get(
-        "trailing_stop_activation_pnl_percent", 10.0)
+        "trailing_stop_activation_pnl_percent", 10.0
+    )
 
     logger.info(
         f"Starting trailing stop loop. "
@@ -524,17 +524,16 @@ async def trailing_stop_loop() -> None:
             current_minute = now.minute
 
             # 次の実行分を計算（interval_minutesの倍数: 0, 15, 30, 45など）
-            next_minute = (
-                (current_minute // interval_minutes) + 1) * interval_minutes
+            next_minute = ((current_minute // interval_minutes) + 1) * interval_minutes
 
             if next_minute >= 60:
                 # 次の時間に繰り越し
                 next_run = (now + timedelta(hours=1)).replace(
-                    minute=0, second=0, microsecond=0)
+                    minute=0, second=0, microsecond=0
+                )
             else:
                 # 同じ時間内
-                next_run = now.replace(
-                    minute=next_minute, second=0, microsecond=0)
+                next_run = now.replace(minute=next_minute, second=0, microsecond=0)
 
             wait_seconds = (next_run - now).total_seconds()
             logger.debug(
@@ -544,31 +543,32 @@ async def trailing_stop_loop() -> None:
 
             # 全ポジションを取得してトレーリングストップをチェック
             logger.info(
-                "[Trailing Stop] Checking positions for trailing stop updates...")
+                "[Trailing Stop] Checking positions for trailing stop updates..."
+            )
 
             positions = await hyperliquid_exchange.exchange_public.fetch_positions()
             await sync_trailing_position(positions=positions)
 
             for pos in positions:
-                contracts = pos.get('contracts', 0)
+                contracts = pos.get("contracts", 0)
                 if not contracts or float(contracts) == 0:
                     continue
 
-                symbol = pos.get('symbol')
+                symbol = pos.get("symbol")
                 if symbol not in perp_symbols:
                     continue
 
-                pnl_percent = pos.get('percentage', 0)
-                unrealized_pnl = pos.get('unrealizedPnl', 0)
+                pnl_percent = pos.get("percentage", 0)
+                unrealized_pnl = pos.get("unrealizedPnl", 0)
                 if unrealized_pnl < 0:
                     pnl_percent *= -1
 
                 # TrailingManagerにポジションが登録されているか確認
-                trailing_position = trailing_manager.get_position(
-                    symbol=symbol)
+                trailing_position = trailing_manager.get_position(symbol=symbol)
                 if trailing_position is None:
                     logger.debug(
-                        f"[Trailing Stop] {symbol}: Not in TrailingManager, skipping")
+                        f"[Trailing Stop] {symbol}: Not in TrailingManager, skipping"
+                    )
                     continue
 
                 # PnLチェック
@@ -587,7 +587,7 @@ async def trailing_stop_loop() -> None:
 
                 # 現在価格を取得
                 ticker = await hyperliquid_exchange.fetch_price_async(symbol)
-                current_price = float(ticker['last'])
+                current_price = float(ticker["last"])
 
                 # トレーリングが未有効化の場合、有効化する
                 if not trailing_position.trailing_activated:
@@ -601,11 +601,10 @@ async def trailing_stop_loop() -> None:
                             symbol=symbol,
                             position=trailing_position,
                         )
-                        trailing_notification_message = (
-                            f"{symbol} : 損失なしのトレーリングストップが有効です！やったね！"
+                        trailing_notification_message = f"{symbol} : 損失なしのトレーリングストップが有効です！やったね！"
+                        await notificator.send_notification_async(
+                            message=trailing_notification_message, files=[]
                         )
-                        await notificator.send_notification_async(message=trailing_notification_message,
-                                                                  files=[])
                 else:
                     # トレーリング有効化済み：通常のトレーリング更新
                     await check_trailing_stop(
@@ -645,7 +644,8 @@ def handle_userFills(fill_data: dict[str, Any]) -> None:
 
         # クローズポジションのみを抽出
         close_fills = [
-            fill for fill in fills
+            fill
+            for fill in fills
             if str(fill.get("dir", "")).lower().find("close") != -1
         ]
 
@@ -659,13 +659,13 @@ def handle_userFills(fill_data: dict[str, Any]) -> None:
         if time > 0:
             import datetime
 
-            dt_object = datetime.datetime.fromtimestamp(
-                time / 1000, tz=timezone.utc)
+            dt_object = datetime.datetime.fromtimestamp(time / 1000, tz=timezone.utc)
 
             # 既に通知済みの場合はスキップ
             if last_close_position_notification_time >= dt_object:
                 logger.debug(
-                    f"Skipping notification for {dt_object} (already notified)")
+                    f"Skipping notification for {dt_object} (already notified)"
+                )
                 return
 
             # 通知処理
@@ -687,8 +687,8 @@ def handle_userFills(fill_data: dict[str, Any]) -> None:
 
             task = asyncio.create_task(
                 notificator.send_notification_async(
-                    message=notification_message,
-                    files=[])
+                    message=notification_message, files=[]
+                )
             )
             background_tasks.add(task)
 
@@ -743,8 +743,7 @@ async def signal_check_loop() -> None:
     logger.info(
         f"Take Profit Rate: {secrets['settings']['perpetual']['take_profit_rate']}"
     )
-    logger.info(
-        f"Stop Loss Rate: {secrets['settings']['perpetual']['stop_loss_rate']}")
+    logger.info(f"Stop Loss Rate: {secrets['settings']['perpetual']['stop_loss_rate']}")
     logger.info(f"Leverage: {secrets['settings']['perpetual']['leverage']}")
     logger.info("------------------")
 
@@ -767,8 +766,9 @@ async def signal_check_loop() -> None:
 
         if next_minute >= 60:
             # 次の時間に繰り越し
-            next_run = (now + timedelta(hours=1)).replace(minute=0,
-                                                          second=0, microsecond=0)
+            next_run = (now + timedelta(hours=1)).replace(
+                minute=0, second=0, microsecond=0
+            )
         else:
             # 同じ時間内
             next_run = now.replace(minute=next_minute, second=0, microsecond=0)
@@ -785,7 +785,8 @@ async def signal_check_loop() -> None:
         fromDateUtc = toDateUtc - timedelta(days=1)  # 過去2分のデータを取得
 
         logger.info(
-            f"[Signal Check] Fetching OHLCV data from {fromDateUtc} to {toDateUtc}")
+            f"[Signal Check] Fetching OHLCV data from {fromDateUtc} to {toDateUtc}"
+        )
 
         # 各シンボルについて処理
         for symbol in perp_symbols:
@@ -800,13 +801,14 @@ async def signal_check_loop() -> None:
                     toDate=toDateUtc,
                 )
 
-                logger.debug(
-                    f"Fetched {len(ohlcv)} OHLCV records for {symbol}")
+                logger.debug(f"Fetched {len(ohlcv)} OHLCV records for {symbol}")
                 if ohlcv:
                     logger.debug(
-                        f"First OHLCV record timestamp: {ohlcv[0][0]} ({datetime.fromtimestamp(ohlcv[0][0]/1000, tz=timezone.utc)})")
+                        f"First OHLCV record timestamp: {ohlcv[0][0]} ({datetime.fromtimestamp(ohlcv[0][0]/1000, tz=timezone.utc)})"
+                    )
                     logger.debug(
-                        f"Last OHLCV record timestamp: {ohlcv[-1][0]} ({datetime.fromtimestamp(ohlcv[-1][0]/1000, tz=timezone.utc)})")
+                        f"Last OHLCV record timestamp: {ohlcv[-1][0]} ({datetime.fromtimestamp(ohlcv[-1][0]/1000, tz=timezone.utc)})"
+                    )
 
                 # OHLCVデータの登録
                 importer.register_data(f"{symbol}", ohlcv)
@@ -856,7 +858,8 @@ async def check_trailing_stop(symbol: str, current_price: float) -> None:
             trailing_stop=position.current_stoploss_price,
         )
         logger.info(
-            f"Updated trailing stoploss for {symbol} to {position.current_stoploss_price}")
+            f"Updated trailing stoploss for {symbol} to {position.current_stoploss_price}"
+        )
 
 
 async def check_signal(
@@ -900,7 +903,9 @@ async def check_signal(
         logger.debug(f"{symbol}: No closed candle available")
         return
     if not candle_gate.claim(candle_identity):
-        logger.debug(f"{symbol}: Candle already evaluated: {candle_identity.open_time_ms}")
+        logger.debug(
+            f"{symbol}: Candle already evaluated: {candle_identity.open_time_ms}"
+        )
         return
 
     # Check for SAR direction and consecutive opposite signals for position closing
@@ -927,11 +932,11 @@ async def check_signal(
     current_position = None
     current_position_side = None
     for pos in positions:
-        if pos.get('symbol') == symbol:
-            contracts = pos.get('contracts', 0)
+        if pos.get("symbol") == symbol:
+            contracts = pos.get("contracts", 0)
             if contracts and float(contracts) != 0:
                 current_position = pos
-                current_position_side = pos.get('side')  # 'long' or 'short'
+                current_position_side = pos.get("side")  # 'long' or 'short'
                 break
 
     # Update opposite SAR counter based on position direction
@@ -939,14 +944,12 @@ async def check_signal(
     if current_position is not None and current_sar_direction is not None:
         # Determine if SAR is opposite to position
         is_opposite_sar = (
-            (current_position_side == 'long' and current_sar_direction == 'short') or
-            (current_position_side == 'short' and current_sar_direction == 'long')
-        )
+            current_position_side == "long" and current_sar_direction == "short"
+        ) or (current_position_side == "short" and current_sar_direction == "long")
 
         if is_opposite_sar:
             # Increment counter
-            sar_opposite_counter[symbol] = sar_opposite_counter.get(
-                symbol, 0) + 1
+            sar_opposite_counter[symbol] = sar_opposite_counter.get(symbol, 0) + 1
             logger.info(
                 f"{symbol}: Opposite SAR detected (position: {current_position_side}, "
                 f"SAR: {current_sar_direction}). Counter: {sar_opposite_counter[symbol]}/{sar_close_consecutive_count}"
@@ -958,8 +961,7 @@ async def check_signal(
         else:
             # Reset counter if SAR is same direction as position
             if sar_opposite_counter.get(symbol, 0) > 0:
-                logger.debug(
-                    f"{symbol}: SAR aligned with position, resetting counter")
+                logger.debug(f"{symbol}: SAR aligned with position, resetting counter")
             sar_opposite_counter[symbol] = 0
     else:
         # No position, reset counter
@@ -972,13 +974,32 @@ async def check_signal(
             f"({sar_opposite_counter[symbol]}/{sar_close_consecutive_count}). "
             f"Closing {current_position_side} position."
         )
-        closed_positions = await hyperliquid_exchange.close_all_positions_perp_async(
-            side=PositionSide.ALL,
-            close_symbol=symbol,
+        contracts = abs(float(current_position.get("contracts") or 0))
+        close_side = "sell" if current_position_side == "long" else "buy"
+        close_intent = create_intent(
+            strategy="sar-close-v1",
+            symbol=symbol,
+            timeframe=timeframe,
+            candle_open_ms=candle_identity.open_time_ms,
+            side=close_side,
+            amount=contracts,
+            reduce_only=True,
         )
+        close_state = await order_executor.execute(close_intent)
 
-        # Send Discord notification for closed positions
-        if closed_positions:
+        # Only a confirmed full fill is treated as a successful close. Open,
+        # partial and unknown outcomes remain in the durable intent store and
+        # inhibit a reverse entry until a later exchange-truth reconciliation.
+        if close_state.status is OrderStatus.FILLED:
+            closed_positions = [
+                {
+                    "id": close_state.order_id or close_state.cloid,
+                    "symbol": symbol,
+                    "side": close_side,
+                    "amount": close_state.filled or contracts,
+                    "price": current_position.get("markPrice") or 0.0,
+                }
+            ]
             trailing_manager.remove_position(symbol=symbol)
             sar_opposite_counter[symbol] = 0  # Reset counter after closing
             await send_close_position_notification(
@@ -991,6 +1012,11 @@ async def check_signal(
             # re-fetch the exchange position and observe it as flat before a
             # reverse entry can be created.
             return
+        logger.error(
+            f"{symbol}: SAR close intent {close_state.cloid} is "
+            f"{close_state.status.value}; reverse entry remains inhibited"
+        )
+        return
 
     # Check for new entry signals
     threshold_percent = secrets["settings"]["perpetual"].get(
@@ -1256,45 +1282,49 @@ def embed_object_create_helper_perp(
 
     # 理由フィールドを最初に追加（存在する場合）
     if reason:
-        fields.append({
-            "name": "🔍 シグナル理由",
-            "value": f"`{reason}`",
-            "inline": False,
-        })
+        fields.append(
+            {
+                "name": "🔍 シグナル理由",
+                "value": f"`{reason}`",
+                "inline": False,
+            }
+        )
 
     # その他のフィールドを追加
-    fields.extend([
-        {
-            "name": "ポジションタイプ",
-            "value": f"`{position_type}`",
-            "inline": True,
-        },
-        {
-            "name": "エントリー価格",
-            "value": f"`{price}`",
-            "inline": True,
-        },
-        {
-            "name": f"{symbol} 数量",
-            "value": f"`{amount}`",
-            "inline": True,
-        },
-        {
-            "name": "注文合計金額",
-            "value": f"`{order_value}`",
-            "inline": True,
-        },
-        {
-            "name": "残りUSDC",
-            "value": f"`{freeUsdc}`",
-            "inline": True,
-        },
-        {
-            "name": "オーダーID",
-            "value": f"`{order_id}`",
-            "inline": True,
-        },
-    ])
+    fields.extend(
+        [
+            {
+                "name": "ポジションタイプ",
+                "value": f"`{position_type}`",
+                "inline": True,
+            },
+            {
+                "name": "エントリー価格",
+                "value": f"`{price}`",
+                "inline": True,
+            },
+            {
+                "name": f"{symbol} 数量",
+                "value": f"`{amount}`",
+                "inline": True,
+            },
+            {
+                "name": "注文合計金額",
+                "value": f"`{order_value}`",
+                "inline": True,
+            },
+            {
+                "name": "残りUSDC",
+                "value": f"`{freeUsdc}`",
+                "inline": True,
+            },
+            {
+                "name": "オーダーID",
+                "value": f"`{order_id}`",
+                "inline": True,
+            },
+        ]
+    )
 
     embed = {
         "title": title,
@@ -1333,12 +1363,14 @@ async def send_close_position_notification(
             price = pos.get("price", 0.0)
             order_id = pos.get("id", "N/A")
 
-            position_details.append({
-                "side": side,
-                "contracts": contracts,
-                "price": price,
-                "order_id": order_id,
-            })
+            position_details.append(
+                {
+                    "side": side,
+                    "contracts": contracts,
+                    "price": price,
+                    "order_id": order_id,
+                }
+            )
 
         # Embed作成
         embed = {
@@ -1368,15 +1400,17 @@ async def send_close_position_notification(
 
         # 各ポジションの詳細を追加
         for i, detail in enumerate(position_details, 1):
-            embed["fields"].append({
-                "name": f"Position #{i} - {detail['side'].upper()}",
-                "value": (
-                    f"数量: `{detail['contracts']}`\n"
-                    f"価格: `{detail['price']}`\n"
-                    f"Order ID: `{detail['order_id']}`"
-                ),
-                "inline": True,
-            })
+            embed["fields"].append(
+                {
+                    "name": f"Position #{i} - {detail['side'].upper()}",
+                    "value": (
+                        f"数量: `{detail['contracts']}`\n"
+                        f"価格: `{detail['price']}`\n"
+                        f"Order ID: `{detail['order_id']}`"
+                    ),
+                    "inline": True,
+                }
+            )
 
         await notificator.send_notification_embed_with_file(
             message="", embeds=[embed], image_buffers=[]
@@ -1384,8 +1418,7 @@ async def send_close_position_notification(
         logger.info(f"Close position notification sent for {symbol}")
 
     except Exception as e:
-        logger.error(
-            f"Error sending close position notification for {symbol}: {e}")
+        logger.error(f"Error sending close position notification for {symbol}: {e}")
 
 
 def notification_plot_buff(
@@ -1511,7 +1544,7 @@ async def main() -> None:
         # 起動時にTrailingManagerを初期化（既存ポジションを取得）
         await initialize_trailing_manager()
 
-    # WebSocket接続を確立（サブスクリプションの前に接続が必要）
+        # WebSocket接続を確立（サブスクリプションの前に接続が必要）
         if hyperliquid_exchange.ws_client.ws is None:
             await hyperliquid_exchange.ws_client.connect()
             logger.info("WebSocket connected before subscriptions")

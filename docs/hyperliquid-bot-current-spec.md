@@ -21,11 +21,11 @@
 | 対象 | 現行用途 | 判定 | 根拠 |
 | --- | --- | --- | --- |
 | `src/crypto_spot_collector/apps/buy_perp.py` | Docker Compose の Hyperliquid bot エントリーポイント | 不完全 | `docker-compose.yml:18-32` の `app_perp.command`。シグナル、注文、TP/SL、トレーリング、Discord を同一プロセスで実行する |
-| `src/crypto_spot_collector/apps/hyperliquid_perp.py` | 手動検証用と思われる単発スクリプト | **危険・実行禁止** | `testnet=False` を固定し (`hyperliquid_perp.py:176-180`)、`main()` から XRP のショート成行注文を直ちに送る (`hyperliquid_perp.py:207-212`)。注文後は未定義の `listener_task` を参照する (`hyperliquid_perp.py:246-248`) ため、正常終了もできない |
+| `src/crypto_spot_collector/apps/hyperliquid_perp.py` | 旧mainnet単発スクリプト | **削除済み** | mainnet固定・起動時発注だったため実行経路ごと削除した。再追加は静的安全テストで拒否する |
 | `Dockerfile` の既定 `CMD` | イメージを Compose 外で直接起動した場合の既定コマンド | 不完全 | `crypto_spot_collector/scripts/buy_spot.py` を指すが、現行構成と一致しない。Compose では上書きされる |
 | `deploy.sh` | pull と Compose 再ビルド・起動 | 不完全 | 事前検査、エラー時停止、ロールバック、稼働確認がない |
 
-`buy_perp.py` と `hyperliquid_perp.py` は同等ではない。前者だけを bot の現行実装として扱い、後者は隔離または削除されるまで絶対に実行しない。
+自動取引の承認済みentrypointは `buy_perp.py` だけである。取引所adapterの生成には検証済み `TradingConfig` が必須で、mainnetはnetwork・allow flag・環境確認phraseの三重interlockを通る。破壊的なtestnet検証は `scripts/hyperliquid_testnet_acceptance.py`、read-only診断は `scripts/test_hyperliquid.py` に分離する。
 
 ## 3. 現行構成とデータフロー
 
@@ -68,7 +68,7 @@ flowchart LR
 | WebSocket 再接続 | 実装済み / 不完全 | 有限回 retry はあるが、公式 heartbeat、欠落 reconcile、恒久復旧がない |
 | 注文状態機械、冪等 retry、銘柄単位 lock | 未実装 | 同時処理、timeout、process restart 時の論理注文を一意にできない |
 | fail-closed 起動、healthcheck、graceful shutdown | 未実装 | 同期失敗後も起動し、終了時の取引状態を検証しない |
-| `hyperliquid_perp.py` の単発検証 | 危険 | mainnet 固定で即時注文するため実行禁止 |
+| `hyperliquid_perp.py` の単発検証 | 削除済み | mainnet固定・即時注文経路を削除し、再追加を静的検査で拒否 |
 
 ## 4. 対象銘柄と現在の非機密設定
 
@@ -223,7 +223,7 @@ Compose の `app_perp` は secrets を read-only mount し、ログを host volu
 | ID | 重要度 | リスクと現行証拠 | 修正先 |
 | --- | --- | --- | --- |
 | R-01 | Critical | `sandbox_mode=false` が追跡設定。安全確認なしで mainnet client を生成する | 戦略入力・mainnet 安全化 |
-| R-02 | Critical | `hyperliquid_perp.py` が mainnet ショート注文を即時送信する | 戦略入力・mainnet 安全化 |
+| R-02 | 解消済み | `hyperliquid_perp.py` を削除し、raw/legacy order APIと未検証adapter生成を実行可能コードの静的検査で禁止 | mainnet実行経路封鎖 |
 | R-03 | Critical | Webhook URL を INFO ログに出す | 通信復旧・監視・終了制御 |
 | R-04 | Critical | 確定足の保証がなく、形成中足でシグナルを出し得る | 戦略入力・mainnet 安全化 |
 | R-05 | Critical | cloid、排他、再試行冪等性、応答不明時の照合がない | 注文状態機械・冪等性 |
@@ -272,7 +272,7 @@ Compose の `app_perp` は secrets を read-only mount し、ログを host volu
 以下をすべて満たすまで **No-Go** とする。
 
 - testnet が既定であり、mainnet は環境、アカウント、最大注文額、対象銘柄、有効期限を含む明示的な二段階承認が必要。
-- `hyperliquid_perp.py` の即時 mainnet 注文経路が削除または強制 testnet 化されている。
+- 旧 `hyperliquid_perp.py` が存在せず、raw/legacy order APIと未検証adapter生成を静的安全テストが拒否する。
 - 機密値をログへ出さず、過去ログと Webhook の扱いが確認済み。
 - 確定足、データ鮮度、ポジション方向、最大 exposure、rate/TP/SL の単位を schema とテストで固定。
 - cloid と注文状態機械により、timeout、process restart、重複 signal 時も at-most-once の意図を reconcile できる。
@@ -285,7 +285,7 @@ Compose の `app_perp` は secrets を read-only mount し、ログを host volu
 ## 11. 調査対象コード
 
 - `src/crypto_spot_collector/apps/buy_perp.py`
-- `src/crypto_spot_collector/apps/hyperliquid_perp.py`
+- `tests/test_execution_path_safety.py`
 - `src/crypto_spot_collector/apps/settings.json`
 - `src/crypto_spot_collector/apps/settings.json.sample`
 - `src/crypto_spot_collector/apps/secrets.json.sample`

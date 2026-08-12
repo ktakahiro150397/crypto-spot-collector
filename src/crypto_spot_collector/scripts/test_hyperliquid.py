@@ -5,6 +5,7 @@ from pyparsing import Any
 from crypto_spot_collector.exchange.bybit import BybitExchange
 from crypto_spot_collector.exchange.hyperliquid import HyperLiquidExchange
 from crypto_spot_collector.exchange.types import PositionSide
+from crypto_spot_collector.trading.config import TradingConfig
 from crypto_spot_collector.utils.close_position_notification import (
     close_position_notification_message,
 )
@@ -62,15 +63,20 @@ async def main() -> None:
     secrets_path = Path(__file__).parent.parent / "apps" / "secrets.json"
     settings_path = Path(__file__).parent.parent / "apps" / "settings.json"
     secrets = load_config(secrets_path, settings_path)
+    diagnostic_settings = dict(secrets["settings"])
+    diagnostic_settings.update(
+        {"network": "testnet", "sandbox_mode": True, "allow_mainnet": False}
+    )
+    trading_config = TradingConfig.from_mapping(
+        diagnostic_settings,
+        symbols=("BTC/USDC:USDC",),
+    )
 
     hyperliquid_exchange = HyperLiquidExchange(
         mainWalletAddress=secrets["hyperliquid"]["mainWalletAddress"],
         apiWalletAddress=secrets["hyperliquid"]["apiWalletAddress"],
         privateKey=secrets["hyperliquid"]["privatekey"],
-        take_profit_rate=secrets["settings"]["perpetual"]["take_profit_rate"],
-        stop_loss_rate=secrets["settings"]["perpetual"]["stop_loss_rate"],
-        leverage=secrets["settings"]["perpetual"]["leverage"],
-        testnet=True,
+        trading_config=trading_config,
     )
 
     # try:
@@ -132,13 +138,6 @@ async def main() -> None:
 
     # print("Balance:", balance)
 
-    # result = await hyperliquid_exchange.create_order_perp_short_async(
-    #     symbol="ETH/USDC:USDC",
-    #     amount=0.01,
-    #     price=3000,
-    # )
-    # print("Order Result:", result)
-
     # tpsl_order = await hyperliquid_exchange.fetch_tp_sl_info(
     #     symbol="ETH/USDC:USDC",
     # )
@@ -165,29 +164,11 @@ async def main() -> None:
     # from crypto_spot_collector.apps.buy_perp import initialize_trailing_manager
     # await initialize_trailing_manager()
 
-    # result = await hyperliquid_exchange.create_order_perp_long_async(
-    #     symbol="SOL/USDC:USDC",
-    #     amount=5,
-    #     price=130,
-    # )
-    # result = await hyperliquid_exchange.create_order_perp_long_async(
-    #     symbol="BTC/USDC:USDC",
-    #     amount=0.001,
-    #     price=89000,
-    # )
-
-    # print("Order Result:", result)
-
-    # 持っているポジションを決済
-    # close_result = await hyperliquid_exchange.close_all_positions_perp_async(
-    #     side=PositionSide.LONG,
-    #     close_symbol="BTC/USDC:USDC",
-    # )
-    # print("Close Position Result:", close_result)
-
     positions = await hyperliquid_exchange.exchange_public.fetch_positions()
     print("Positions:", positions)
 
+
 if __name__ == "__main__":
     import asyncio
+
     asyncio.run(main())

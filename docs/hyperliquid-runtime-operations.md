@@ -1,5 +1,24 @@
 # Hyperliquid runtime operations
 
+## Approved execution paths
+
+- `crypto_spot_collector/apps/buy_perp.py` is the only production trading
+  entrypoint. It constructs the exchange adapter from a validated
+  `TradingConfig`; mainnet requires `network=mainnet`, `allow_mainnet=true`,
+  and the exact `HYPERLIQUID_MAINNET_CONFIRMATION` phrase.
+- `crypto_spot_collector/scripts/hyperliquid_testnet_acceptance.py` is the only
+  destructive acceptance runner. It requires `HYPERLIQUID_TESTNET=true`,
+  creates a testnet-only `TradingConfig`, scopes cleanup to its selected
+  symbol, and must never be repurposed for mainnet.
+- `crypto_spot_collector/scripts/test_hyperliquid.py` is a read-only testnet
+  diagnostic. It does not submit or cancel orders.
+- The former `apps/hyperliquid_perp.py` mainnet smoke script was deleted.
+  Legacy `create_order_perp_*` and bulk-close APIs raise immediately. Runtime
+  entries and exits must use `IdempotentOrderExecutor` with durable cloids.
+- `tests/test_execution_path_safety.py` scans executable app/script sources so
+  raw `create_order`, legacy order calls, or a raw `testnet` constructor flag
+  cannot be reintroduced unnoticed.
+
 ## REST policy
 
 - Read-only calls use a 15-second timeout, at most four attempts, exponential

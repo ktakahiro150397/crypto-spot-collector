@@ -23,6 +23,7 @@ from dotenv import load_dotenv
 from loguru import logger
 
 from crypto_spot_collector.exchange.hyperliquid import HyperLiquidExchange
+from crypto_spot_collector.trading.config import TradingConfig
 from crypto_spot_collector.trading.order_state import (
     IdempotentOrderExecutor,
     OrderIntent,
@@ -31,7 +32,6 @@ from crypto_spot_collector.trading.order_state import (
     create_intent,
 )
 from crypto_spot_collector.trading.protection import ProtectionReconciler
-
 
 SYMBOL_CANDIDATES = (
     "BTC/USDC:USDC",
@@ -166,15 +166,25 @@ async def run(monitor_seconds: int, sample_seconds: int) -> dict[str, Any]:
         "monitor_requested_seconds": monitor_seconds,
         "sample_seconds": sample_seconds,
     }
+    trading_config = TradingConfig(
+        symbols=SYMBOL_CANDIDATES,
+        timeframe="1m",
+        amount_usdc=12.5,
+        leverage=LEVERAGE,
+        take_profit_roe=TAKE_PROFIT_ROE,
+        stop_loss_roe=STOP_LOSS_ROE,
+        trailing_interval_minutes=1,
+        trailing_activation_roe=1.0,
+        sar_consecutive_count=1,
+        sar_close_consecutive_count=1,
+        price_change_threshold_percent=1.0,
+    )
 
     exchange = HyperLiquidExchange(
         mainWalletAddress=wallet,
         apiWalletAddress=wallet,
         privateKey=private_key,
-        take_profit_rate=TAKE_PROFIT_ROE,
-        stop_loss_rate=STOP_LOSS_ROE,
-        leverage=LEVERAGE,
-        testnet=True,
+        trading_config=trading_config,
     )
     reconciler = ProtectionReconciler(
         exchange,
