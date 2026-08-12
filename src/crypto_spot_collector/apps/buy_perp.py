@@ -24,6 +24,12 @@ from crypto_spot_collector.exchange.types import PositionSide
 from crypto_spot_collector.notification.discord import discordNotification
 from crypto_spot_collector.providers.market_data_provider import MarketDataProvider
 from crypto_spot_collector.trading.config import TradingConfig
+from crypto_spot_collector.trading.order_state import (
+    IdempotentOrderExecutor,
+    OrderStatus,
+    SQLiteOrderIntentStore,
+    create_intent,
+)
 from crypto_spot_collector.trading.strategy import CandleGate, latest_closed_identity
 from crypto_spot_collector.utils.close_position_notification import (
     close_position_notification_message,
@@ -163,6 +169,10 @@ sar_opposite_counter: dict[str, int] = {}
 trailing_manager = TrailingStopManagerHyperLiquid()
 background_tasks: set[asyncio.Task] = set()
 candle_gate = CandleGate()
+order_intent_store = SQLiteOrderIntentStore(
+    Path(__file__).parent / "state" / "order_intents.sqlite"
+)
+order_executor = IdempotentOrderExecutor(hyperliquid_exchange, order_intent_store)
 
 last_close_position_notification_time = datetime.now(timezone.utc)
 
@@ -972,6 +982,13 @@ async def check_signal(
     else:
         logger.debug(f"{symbol}: No signal detected")
 
+    if current_position is not None:
+        logger.debug(
+            f"{symbol}: Position already exists; entry/add/reverse is inhibited "
+            "until the exchange confirms a flat position"
+        )
+        return
+
     if long_signal:
         await execute_long_order(
             symbol=symbol,
@@ -1013,25 +1030,24 @@ async def execute_long_order(
         # 注文数量を計算
         amount = amountByUSDC / current_price
 
-        # 既存のTP/SL注文をキャンセル（同じ方向の追加注文時に2重注文を防ぐ）
-        existing_tp_sl = await hyperliquid_exchange.fetch_tp_sl_info(symbol=symbol)
-        if existing_tp_sl is not None:
-            logger.info(
-                f"{symbol}: Canceling existing TP/SL orders before new order")
-            await hyperliquid_exchange.cancel_orders_async(
-                order_ids=[
-                    existing_tp_sl.take_profit_order_id,
-                    existing_tp_sl.stop_loss_order_id,
-                ],
-                symbol=symbol,
-            )
-
-        # ロングオーダー発注（新しいTP/SL注文が作成される）
-        order_result = await hyperliquid_exchange.create_order_perp_long_async(
-            symbol=f"{symbol}",
-            amount=amount,
-            price=current_price,
+        candle_open_ms = int(
+            pd.to_datetime(df.iloc[-1]["timestamp"], utc=True).timestamp() * 1000
         )
+        intent = create_intent(
+            strategy="sar-price-v1",
+            symbol=symbol,
+            timeframe=timeframe,
+            candle_open_ms=candle_open_ms,
+            side="buy",
+            amount=amount,
+        )
+        order_state = await order_executor.execute(intent)
+        if order_state.status in {OrderStatus.UNKNOWN, OrderStatus.REJECTED}:
+            raise RuntimeError(
+                f"order intent {order_state.cloid} ended as {order_state.status.value}: "
+                f"{order_state.error}"
+            )
+        order_result = {"id": order_state.order_id or order_state.cloid}
         logger.success(f"Successfully created long order for {symbol}")
 
         # トレーリングストップ管理の更新
@@ -1039,14 +1055,16 @@ async def execute_long_order(
         current_tp_sl_info = await hyperliquid_exchange.fetch_tp_sl_info(
             symbol=symbol,
         )
-        trailing_manager.add_or_update_position(
-            symbol=symbol,
-            side=PositionSide.LONG,
-            entry_price=current_price,
-            stoploss_order_id=current_tp_sl_info.stop_loss_order_id,
-            initial_stoploss_price=current_tp_sl_info.stop_loss_trigger_price,
-            # trailing_activatedは指定しないことで、既存の状態を引き継ぐ
-        )
+        if current_tp_sl_info is not None:
+            trailing_manager.add_or_update_position(
+                symbol=symbol,
+                side=PositionSide.LONG,
+                entry_price=current_price,
+                stoploss_order_id=current_tp_sl_info.stop_loss_order_id,
+                initial_stoploss_price=current_tp_sl_info.stop_loss_trigger_price,
+            )
+        else:
+            logger.error(f"{symbol}: Entry accepted but TP/SL is not visible yet")
 
         # Discord通知
         free_usdc = await hyperliquid_exchange.fetch_free_usdt_async()
@@ -1111,25 +1129,24 @@ async def execute_short_order(
         # 注文数量を計算
         amount = amountByUSDC / current_price
 
-        # 既存のTP/SL注文をキャンセル（同じ方向の追加注文時に2重注文を防ぐ）
-        existing_tp_sl = await hyperliquid_exchange.fetch_tp_sl_info(symbol=symbol)
-        if existing_tp_sl is not None:
-            logger.info(
-                f"{symbol}: Canceling existing TP/SL orders before new order")
-            await hyperliquid_exchange.cancel_orders_async(
-                order_ids=[
-                    existing_tp_sl.take_profit_order_id,
-                    existing_tp_sl.stop_loss_order_id,
-                ],
-                symbol=symbol,
-            )
-
-        # ショートオーダー発注（新しいTP/SL注文が作成される）
-        order_result = await hyperliquid_exchange.create_order_perp_short_async(
-            symbol=f"{symbol}",
-            amount=amount,
-            price=current_price,
+        candle_open_ms = int(
+            pd.to_datetime(df.iloc[-1]["timestamp"], utc=True).timestamp() * 1000
         )
+        intent = create_intent(
+            strategy="sar-price-v1",
+            symbol=symbol,
+            timeframe=timeframe,
+            candle_open_ms=candle_open_ms,
+            side="sell",
+            amount=amount,
+        )
+        order_state = await order_executor.execute(intent)
+        if order_state.status in {OrderStatus.UNKNOWN, OrderStatus.REJECTED}:
+            raise RuntimeError(
+                f"order intent {order_state.cloid} ended as {order_state.status.value}: "
+                f"{order_state.error}"
+            )
+        order_result = {"id": order_state.order_id or order_state.cloid}
         logger.success(f"Successfully created short order for {symbol}")
 
         # トレーリングストップ管理の更新
@@ -1138,14 +1155,16 @@ async def execute_short_order(
             symbol=symbol,
         )
 
-        trailing_manager.add_or_update_position(
-            symbol=symbol,
-            side=PositionSide.SHORT,
-            entry_price=current_price,
-            stoploss_order_id=current_tp_sl_info.stop_loss_order_id,
-            initial_stoploss_price=current_tp_sl_info.stop_loss_trigger_price,
-            # trailing_activatedは指定しないことで、既存の状態を引き継ぐ
-        )
+        if current_tp_sl_info is not None:
+            trailing_manager.add_or_update_position(
+                symbol=symbol,
+                side=PositionSide.SHORT,
+                entry_price=current_price,
+                stoploss_order_id=current_tp_sl_info.stop_loss_order_id,
+                initial_stoploss_price=current_tp_sl_info.stop_loss_trigger_price,
+            )
+        else:
+            logger.error(f"{symbol}: Entry accepted but TP/SL is not visible yet")
 
         # Discord通知
         free_usdc = await hyperliquid_exchange.fetch_free_usdt_async()

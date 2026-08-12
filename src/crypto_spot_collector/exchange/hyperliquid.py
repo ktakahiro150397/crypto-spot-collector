@@ -16,6 +16,7 @@ from crypto_spot_collector.exchange.types import (
     SpotAsset,
     SpotOrderResult,
 )
+from crypto_spot_collector.trading.order_state import OrderIntent
 
 
 @dataclass
@@ -121,6 +122,62 @@ class HyperLiquidExchange(IExchange):
             logger.error(f"Price not found for symbol {symbol}")
             raise Exception(
                 f"symbol = {symbol} | Price not found in ticker data")
+
+    async def submit_market_order(self, intent: OrderIntent) -> dict[str, Any]:
+        """Submit an intent using its deterministic Hyperliquid cloid."""
+        ticker = await self.fetch_price_async(intent.symbol)
+        market_price = float(ticker["last"])
+        params: dict[str, Any] = {
+            "clientOrderId": intent.cloid,
+            "reduceOnly": intent.reduce_only,
+        }
+        if not intent.reduce_only:
+            is_long = intent.side == "buy"
+            tp_multiplier = 1 if is_long else -1
+            sl_multiplier = -1 if is_long else 1
+            params.update(
+                {
+                    "stopLoss": {
+                        "type": "market",
+                        "triggerPrice": market_price
+                        * (1 + sl_multiplier * self.stop_loss_rate / self.leverage),
+                    },
+                    "takeProfit": {
+                        "type": "market",
+                        "triggerPrice": market_price
+                        * (1 + tp_multiplier * self.take_profit_rate / self.leverage),
+                    },
+                }
+            )
+        result = await self.exchange_private.create_order(
+            symbol=intent.symbol,
+            type="market",
+            side=intent.side,
+            amount=intent.amount,
+            price=market_price,
+            params=params,
+        )
+        return dict(result)
+
+    async def fetch_order_by_cloid(
+        self, symbol: str, cloid: str
+    ) -> dict[str, Any] | None:
+        try:
+            order = await self.exchange_public.fetch_order(
+                cloid, symbol, {"clientOrderId": cloid}
+            )
+        except ccxt_async.OrderNotFound:
+            return None
+        return dict(order)
+
+    async def fetch_open_orders(self, symbol: str) -> list[dict[str, Any]]:
+        return list(await self.exchange_public.fetch_open_orders(symbol))
+
+    async def fetch_fills(self, symbol: str) -> list[dict[str, Any]]:
+        return list(await self.exchange_public.fetch_my_trades(symbol))
+
+    async def fetch_positions(self) -> list[dict[str, Any]]:
+        return list(await self.exchange_public.fetch_positions())
 
     async def fetch_ohlcv_async(
         self,
