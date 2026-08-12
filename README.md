@@ -142,6 +142,10 @@ cp settings.json.sample settings.json
 
 詳細は `src/crypto_spot_collector/apps/CONFIG.md` を参照してください。
 
+## 運用メモ
+
+- [yanelmoserver 再デプロイ前ベースライン](docs/yanelmoserver_deployment_baseline.md)
+
 ## ライセンス
 
 MIT License
