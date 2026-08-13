@@ -128,6 +128,15 @@ def test_production_app_does_not_send_periodic_discord_heartbeats() -> None:
     assert "health_pulse_loop" in function_names
 
 
+def test_production_entries_pass_the_hard_notional_cap_to_normalization() -> None:
+    app_path = (
+        REPOSITORY_ROOT / "src" / "crypto_spot_collector" / "apps" / "buy_perp.py"
+    )
+    source = app_path.read_text(encoding="utf-8")
+
+    assert source.count("max_notional=trading_config.max_order_notional_usdc") == 2
+
+
 def test_exchange_rejects_unvalidated_mainnet_before_client_creation() -> None:
     invalid_mainnet = _valid_config(network=Network.MAINNET)
     with pytest.raises(ValueError, match="mainnet"):

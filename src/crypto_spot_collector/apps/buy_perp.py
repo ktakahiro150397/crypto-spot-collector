@@ -991,6 +991,7 @@ async def execute_long_order(
             symbol,
             amountByUSDC / current_price,
             reference_price=current_price,
+            max_notional=trading_config.max_order_notional_usdc,
         )
         amount = prepared.amount
 
@@ -1102,6 +1103,7 @@ async def execute_short_order(
             symbol,
             amountByUSDC / current_price,
             reference_price=current_price,
+            max_notional=trading_config.max_order_notional_usdc,
         )
         amount = prepared.amount
 

@@ -242,6 +242,7 @@ class FakeRest:
 class FakeCcxtExchange:
     def __init__(self) -> None:
         self.leverage_calls: list[tuple[int, str, dict[str, Any]]] = []
+        self.precisionMode = 4
 
     async def load_markets(self) -> dict[str, Any]:
         return {}
@@ -252,7 +253,8 @@ class FakeCcxtExchange:
                 "amount": {"min": 0.001},
                 "cost": {"min": 10},
                 "leverage": {"max": 25},
-            }
+            },
+            "precision": {"amount": 0.001},
         }
 
     def amount_to_precision(self, _symbol: str, amount: float) -> str:
@@ -276,7 +278,10 @@ def bare_exchange() -> HyperLiquidExchange:
     exchange.exchange_private = FakeCcxtExchange()
     exchange.rest = FakeRest()
     exchange.leverage = 20
-    exchange.trading_config = SimpleNamespace(margin_mode="cross")
+    exchange.trading_config = SimpleNamespace(
+        margin_mode="cross",
+        max_order_notional_usdc=10.5,
+    )
     return exchange
 
 
@@ -296,6 +301,34 @@ async def test_order_is_rounded_to_market_precision_and_minimum() -> None:
 
     with pytest.raises(ValueError, match="invalid order amount"):
         await exchange.prepare_market_order(SYMBOL, math.nan, reference_price=2500)
+
+
+@pytest.mark.asyncio
+async def test_entry_amount_is_rounded_down_below_notional_cap() -> None:
+    exchange = bare_exchange()
+
+    prepared = await exchange.prepare_market_order(
+        SYMBOL,
+        0.0106,
+        reference_price=1000,
+        max_notional=10.5,
+    )
+
+    assert prepared.amount == 0.01
+    assert prepared.amount * prepared.reference_price == 10.0
+
+
+@pytest.mark.asyncio
+async def test_notional_cap_fails_when_safe_amount_is_below_exchange_minimum() -> None:
+    exchange = bare_exchange()
+
+    with pytest.raises(ValueError, match="below .* minimum"):
+        await exchange.prepare_market_order(
+            SYMBOL,
+            0.0106,
+            reference_price=1000,
+            max_notional=9.9,
+        )
 
 
 @pytest.mark.asyncio

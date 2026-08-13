@@ -208,6 +208,11 @@ class HyperLiquidExchange(IExchange):
             intent.symbol,
             intent.amount,
             reference_price=market_price,
+            max_notional=(
+                None
+                if intent.reduce_only
+                else self.trading_config.max_order_notional_usdc
+            ),
         )
         if not math.isclose(prepared.amount, intent.amount, rel_tol=1e-12):
             raise ValueError(
@@ -240,8 +245,9 @@ class HyperLiquidExchange(IExchange):
         amount: float,
         *,
         reference_price: float | None = None,
+        max_notional: float | None = None,
     ) -> PreparedMarketOrder:
-        """Normalize amount/price and enforce exchange market limits."""
+        """Normalize amount/price and enforce exchange and entry limits."""
 
         await self.rest.call(
             "load_markets",
@@ -270,6 +276,35 @@ class HyperLiquidExchange(IExchange):
         ):
             raise ValueError(f"order for {symbol} rounds to zero")
 
+        if max_notional is not None:
+            max_notional = float(max_notional)
+            if not math.isfinite(max_notional) or max_notional <= 0:
+                raise ValueError(f"invalid maximum order notional for {symbol}")
+            if normalized_amount * normalized_price > max_notional:
+                capped_amount = float(
+                    self.exchange_private.amount_to_precision(
+                        symbol,
+                        max_notional / normalized_price,
+                    )
+                )
+                if capped_amount * normalized_price > max_notional:
+                    amount_increment = float(
+                        ((market.get("precision", {}) or {}).get("amount") or 0)
+                    )
+                    if (
+                        self.exchange_private.precisionMode != ccxt_async.TICK_SIZE
+                        or not math.isfinite(amount_increment)
+                        or amount_increment <= 0
+                    ):
+                        raise ValueError(f"cannot safely cap order amount for {symbol}")
+                    capped_amount = float(
+                        self.exchange_private.amount_to_precision(
+                            symbol,
+                            capped_amount - amount_increment,
+                        )
+                    )
+                normalized_amount = min(normalized_amount, capped_amount)
+
         limits = market.get("limits", {})
         minimum_amount = float((limits.get("amount", {}) or {}).get("min") or 0)
         # Hyperliquid's documented perp minimum is $10. Prefer stricter live
@@ -279,6 +314,11 @@ class HyperLiquidExchange(IExchange):
             float((limits.get("cost", {}) or {}).get("min") or 0),
         )
         notional = normalized_amount * normalized_price
+        if max_notional is not None and notional > max_notional:
+            raise ValueError(
+                f"order notional {notional:.8f} exceeds configured maximum "
+                f"{max_notional:.8f}"
+            )
         if minimum_amount and normalized_amount < minimum_amount:
             raise ValueError(
                 f"order amount {normalized_amount} is below {symbol} minimum "
