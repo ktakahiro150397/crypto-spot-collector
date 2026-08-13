@@ -22,6 +22,7 @@ from crypto_spot_collector.trading.strategy import (
 )
 
 from .data import CandleSeries, CandleSeriesKey, MarketType, resample_ohlcv
+from .regime import PreparedEntryFilter
 
 
 class BacktestConfigError(ValueError):
@@ -183,6 +184,8 @@ class PerpetualSarBacktester:
         self._signal_evaluator = signal_evaluator or (
             lambda frame: evaluate_sar_signal(frame, checker)
         )
+        self._entry_filter_id: str | None
+        self._entry_regime: str | None
         self._reset()
 
     def prepare_signals(self, series: CandleSeries) -> PreparedSarSignals:
@@ -222,12 +225,20 @@ class PerpetualSarBacktester:
         series: CandleSeries,
         *,
         prepared_signals: PreparedSarSignals | None = None,
+        prepared_entry_filter: PreparedEntryFilter | None = None,
     ) -> BacktestResult:
         self._validate_series(series)
         self.config.validate(series.key.timeframe)
         prepared = prepared_signals or self.prepare_signals(series)
         self._validate_prepared_signals(series, prepared)
+        if prepared_entry_filter is not None:
+            self._validate_prepared_entry_filter(series, prepared_entry_filter)
         self._reset()
+        self._entry_filter_id = (
+            prepared_entry_filter.config.identifier
+            if prepared_entry_filter is not None
+            else None
+        )
         base = series.frame
         source_ms = _timeframe_ms(series.key.timeframe)
         source_delta = pd.Timedelta(milliseconds=source_ms)
@@ -263,9 +274,19 @@ class PerpetualSarBacktester:
             self._update_trailing(candle_close, close_price, source_ms)
 
             close_ms = int(candle_close.timestamp() * 1000)
+            if (
+                prepared_entry_filter is not None
+                and close_ms in prepared_entry_filter.direction_by_close_ms
+            ):
+                self._entry_regime = prepared_entry_filter.direction_by_close_ms[
+                    close_ms
+                ]
             decision = prepared.decisions_by_close_ms.get(close_ms)
             if decision is not None:
-                self._apply_signal_decision(decision)
+                self._apply_signal_decision(
+                    decision,
+                    entry_filter_active=prepared_entry_filter is not None,
+                )
 
         if self._position is not None and self.config.close_open_position_at_end:
             final_time = pd.Timestamp(timestamps[-1]) + source_delta
@@ -328,16 +349,47 @@ class PerpetualSarBacktester:
                 "prepared SAR signals do not match series or signal configuration"
             )
 
+    def _validate_prepared_entry_filter(
+        self,
+        series: CandleSeries,
+        prepared: PreparedEntryFilter,
+    ) -> None:
+        expected = (
+            series.key,
+            _timestamp_ms(series.frame.iloc[0]["timestamp"]),
+            _timestamp_ms(series.frame.iloc[-1]["timestamp"]),
+            len(series.frame),
+        )
+        actual = (
+            prepared.series_key,
+            prepared.source_start_ms,
+            prepared.source_end_ms,
+            prepared.source_candle_count,
+        )
+        if actual != expected:
+            raise BacktestConfigError(
+                "prepared entry filter does not match the candle series"
+            )
+
     def _reset(self) -> None:
         self._cash = self.config.initial_equity
         self._position: OpenPosition | None = None
         self._pending_action: PendingAction | None = None
         self._opposite_count = 0
+        self._entry_filter_id = None
+        self._entry_regime = None
+        self._entry_signal_count = 0
+        self._filtered_entry_signal_count = 0
         self._trailing = TrailingStopManagerHyperLiquid()
         self._trades: list[TradeRecord] = []
         self._equity_rows: list[dict[str, object]] = []
 
-    def _apply_signal_decision(self, decision: SarSignalDecision) -> None:
+    def _apply_signal_decision(
+        self,
+        decision: SarSignalDecision,
+        *,
+        entry_filter_active: bool,
+    ) -> None:
         if decision.direction is None:
             return
         if decision.long_signal and decision.short_signal:
@@ -353,8 +405,16 @@ class PerpetualSarBacktester:
 
         self._opposite_count = 0
         if decision.long_signal:
+            self._entry_signal_count += 1
+            if entry_filter_active and self._entry_regime != "long":
+                self._filtered_entry_signal_count += 1
+                return
             self._pending_action = PendingAction.OPEN_LONG
         elif decision.short_signal:
+            self._entry_signal_count += 1
+            if entry_filter_active and self._entry_regime != "short":
+                self._filtered_entry_signal_count += 1
+                return
             self._pending_action = PendingAction.OPEN_SHORT
 
     def _execute_pending(self, timestamp: pd.Timestamp, open_price: float) -> None:
@@ -570,6 +630,9 @@ class PerpetualSarBacktester:
             },
             "config": asdict(self.config),
             "funding_included": series.funding_available,
+            "entry_filter_id": self._entry_filter_id,
+            "entry_signal_count": self._entry_signal_count,
+            "filtered_entry_signal_count": self._filtered_entry_signal_count,
             "trade_count": trade_count,
             "total_net_pnl": final_equity - self.config.initial_equity,
             "total_return_percent": (

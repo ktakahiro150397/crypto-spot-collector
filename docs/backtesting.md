@@ -239,6 +239,19 @@ a machine-readable summary, and a short Markdown report. Search output is
 ignored by Git because it can be regenerated from the checksum-verified
 source CSV and the command above.
 
+## Comparing a higher-timeframe trend filter
+
+`backtest-regime-sweep` compares the selected one-hour SAR configuration with
+entry filters built from completed four-hour candles. It tests price relative
+to EMA with optional ADX strength, while leaving protection and existing
+position exits unchanged. It also emits gross PnL, assumed fees, net PnL,
+long/short splits, and exit-reason counts.
+
+The full command and interpretation are recorded in
+[`backtest-regime-filter-analysis.md`](backtest-regime-filter-analysis.md).
+As with the coarse parameter search, only the training phase selects nominees;
+holdout and confirmation results cannot change the selected variants.
+
 ## Required verification
 
 Automated tests must cover data identity and validation, correct OHLCV

@@ -13,6 +13,10 @@ from crypto_spot_collector.backtesting.engine import (
     BacktestConfigError,
     PerpetualSarBacktester,
 )
+from crypto_spot_collector.backtesting.regime import (
+    EntryFilterConfig,
+    PreparedEntryFilter,
+)
 from crypto_spot_collector.trading.strategy import SarSignalDecision
 
 
@@ -77,6 +81,21 @@ def _config(**overrides: object) -> BacktestConfig:
     }
     values.update(overrides)
     return BacktestConfig(**values)  # type: ignore[arg-type]
+
+
+def _entry_filter(
+    series: CandleSeries,
+    directions: dict[int, str | None],
+) -> PreparedEntryFilter:
+    timestamps = series.frame["timestamp"]
+    return PreparedEntryFilter(
+        series_key=series.key,
+        source_start_ms=int(pd.Timestamp(timestamps.iloc[0]).timestamp() * 1_000),
+        source_end_ms=int(pd.Timestamp(timestamps.iloc[-1]).timestamp() * 1_000),
+        source_candle_count=len(series.frame),
+        config=EntryFilterConfig(),
+        direction_by_close_ms=directions,
+    )
 
 
 def test_signal_fills_at_next_open_with_adverse_slippage_and_fees() -> None:
@@ -278,3 +297,44 @@ def test_prepared_sar_signals_are_reusable_and_configuration_checked() -> None:
     other_period = _series(_flat_rows(5))
     with pytest.raises(BacktestConfigError, match="prepared SAR signals"):
         backtester.run(other_period, prepared_signals=prepared)
+
+
+def test_entry_filter_blocks_only_new_entries_and_records_signal_counts() -> None:
+    series = _series(_flat_rows(4))
+    evaluator = _evaluator(
+        {
+            "00:00": SarSignalDecision("long", True, False),
+            "00:01": SarSignalDecision("short", False, False),
+            "00:02": SarSignalDecision("short", False, False),
+        }
+    )
+    backtester = PerpetualSarBacktester(_config(), signal_evaluator=evaluator)
+    first_close_ms = int(pd.Timestamp("2026-01-01T00:01:00Z").timestamp() * 1_000)
+
+    blocked = backtester.run(
+        series,
+        prepared_entry_filter=_entry_filter(series, {first_close_ms: "short"}),
+    )
+    allowed = backtester.run(
+        series,
+        prepared_entry_filter=_entry_filter(series, {first_close_ms: "long"}),
+    )
+
+    assert blocked.trades.empty
+    assert blocked.summary["entry_signal_count"] == 1
+    assert blocked.summary["filtered_entry_signal_count"] == 1
+    assert allowed.trades.iloc[0]["exit_reason"] == "opposite_sar"
+    assert allowed.summary["entry_signal_count"] == 1
+    assert allowed.summary["filtered_entry_signal_count"] == 0
+
+
+def test_entry_filter_must_match_the_execution_series() -> None:
+    series = _series(_flat_rows(3))
+    other = _series(_flat_rows(4))
+    prepared = _entry_filter(other, {})
+
+    with pytest.raises(BacktestConfigError, match="entry filter"):
+        PerpetualSarBacktester(_config()).run(
+            series,
+            prepared_entry_filter=prepared,
+        )

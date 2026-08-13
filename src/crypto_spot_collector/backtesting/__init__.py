@@ -27,6 +27,12 @@ from .engine import (
     PreparedSarSignals,
     TradeRecord,
 )
+from .regime import (
+    EntryFilterConfig,
+    EntryFilterError,
+    PreparedEntryFilter,
+    prepare_entry_filter,
+)
 from .reporting import write_backtest_report
 
 __all__ = [
@@ -40,13 +46,17 @@ __all__ = [
     "CandleSeries",
     "CandleSeriesKey",
     "DownloadResult",
+    "EntryFilterConfig",
+    "EntryFilterError",
     "MarketType",
     "PerpetualSarBacktester",
     "PreparedSarSignals",
+    "PreparedEntryFilter",
     "TradeRecord",
     "download_binance_usdm_klines",
     "load_ohlcv_csv",
     "plan_archives",
+    "prepare_entry_filter",
     "provenance_path",
     "resample_ohlcv",
     "select_period",
