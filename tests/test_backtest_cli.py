@@ -1,5 +1,6 @@
 """CLI artifact tests for the offline backtest."""
 
+import json
 from pathlib import Path
 
 import pandas as pd
@@ -50,3 +51,47 @@ def test_cli_writes_deterministic_report_artifacts(tmp_path: Path) -> None:
         assert (first / name).read_bytes() == (second / name).read_bytes()
 
     assert len(pd.read_csv(first / "equity.csv")) == 9
+
+
+def test_cli_requires_and_records_explicit_proxy_mode(tmp_path: Path) -> None:
+    input_path = tmp_path / "binance.csv"
+    frame = pd.DataFrame(
+        {
+            "timestamp": pd.date_range("2026-01-01", periods=6, freq="1min", tz="UTC"),
+            "open": [100.0] * 6,
+            "high": [100.0] * 6,
+            "low": [100.0] * 6,
+            "close": [100.0] * 6,
+            "volume": [1.0] * 6,
+        }
+    )
+    frame.to_csv(input_path, index=False)
+    output = tmp_path / "proxy"
+
+    assert (
+        main(
+            [
+                "--input",
+                str(input_path),
+                "--exchange",
+                "binance",
+                "--symbol",
+                "ETH/USDT:USDT",
+                "--source-timeframe",
+                "1m",
+                "--signal-timeframe",
+                "3m",
+                "--trailing-interval-minutes",
+                "1",
+                "--taker-fee-bps",
+                "5",
+                "--allow-proxy-data",
+                "--output-dir",
+                str(output),
+            ]
+        )
+        == 0
+    )
+    summary = json.loads((output / "summary.json").read_text(encoding="utf-8"))
+    assert summary["data_mode"] == "proxy"
+    assert summary["series"]["exchange"] == "binance"

@@ -10,12 +10,17 @@ import pytest
 from crypto_spot_collector.backtesting.data import CandleSeries, CandleSeriesKey
 from crypto_spot_collector.backtesting.engine import (
     BacktestConfig,
+    BacktestConfigError,
     PerpetualSarBacktester,
 )
 from crypto_spot_collector.trading.strategy import SarSignalDecision
 
 
-def _series(rows: list[dict[str, float]]) -> CandleSeries:
+def _series(
+    rows: list[dict[str, float]],
+    *,
+    exchange: str = "hyperliquid",
+) -> CandleSeries:
     frame = pd.DataFrame(rows)
     frame.insert(
         0,
@@ -24,7 +29,8 @@ def _series(rows: list[dict[str, float]]) -> CandleSeries:
     )
     if "volume" not in frame:
         frame["volume"] = 1.0
-    key = CandleSeriesKey("hyperliquid", "perpetual", "ETH/USDC:USDC", "1m")
+    symbol = "ETH/USDC:USDC" if exchange == "hyperliquid" else "ETH/USDT:USDT"
+    key = CandleSeriesKey(exchange, "perpetual", symbol, "1m")
     return CandleSeries.from_frame(key, frame)
 
 
@@ -233,3 +239,18 @@ def test_no_signal_still_returns_a_stable_empty_trade_ledger() -> None:
         "net_pnl",
         "exit_reason",
     ]
+
+
+def test_binance_proxy_requires_explicit_permission_and_marks_summary() -> None:
+    series = _series(_flat_rows(2), exchange="binance")
+
+    with pytest.raises(BacktestConfigError, match="explicit allow_proxy_data"):
+        PerpetualSarBacktester(_config()).run(series)
+
+    result = PerpetualSarBacktester(
+        _config(allow_proxy_data=True),
+        signal_evaluator=_evaluator({}),
+    ).run(series)
+    assert result.summary["strategy_exchange"] == "hyperliquid"
+    assert result.summary["data_mode"] == "proxy"
+    assert "Binance prices" in str(result.summary["proxy_warning"])

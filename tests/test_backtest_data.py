@@ -1,17 +1,20 @@
 """Tests for identity-aware historical candle input."""
 
+import hashlib
+import json
 from pathlib import Path
 
 import pandas as pd
 import pytest
 
 from crypto_spot_collector.backtesting.data import (
-    CSVFormat,
     CandleDataError,
     CandleSeries,
     CandleSeriesKey,
+    CSVFormat,
     MarketType,
     load_ohlcv_csv,
+    provenance_path,
     resample_ohlcv,
     select_period,
     validate_ohlcv,
@@ -154,3 +157,20 @@ def test_period_selection_rejects_empty_or_reversed_range() -> None:
         select_period(series, start="2026-01-02", end="2026-01-01")
     with pytest.raises(CandleDataError, match="no candles"):
         select_period(series, start="2026-01-02")
+
+
+def test_loader_rejects_tampered_provenance_hash(tmp_path: Path) -> None:
+    csv_path = tmp_path / "candles.csv"
+    _minute_frame(2).to_csv(csv_path, index=False)
+    manifest = {
+        "source_exchange": "hyperliquid",
+        "market_type": "perpetual",
+        "symbol": "ETH/USDC:USDC",
+        "timeframe": "1m",
+        "canonical_csv": {"sha256": hashlib.sha256(b"different").hexdigest()},
+    }
+    provenance_path(csv_path).write_text(json.dumps(manifest), encoding="utf-8")
+    key = CandleSeriesKey("hyperliquid", "perpetual", "ETH/USDC:USDC", "1m")
+
+    with pytest.raises(CandleDataError, match="does not match provenance"):
+        load_ohlcv_csv(csv_path, key=key)

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 import math
 from dataclasses import dataclass
 from enum import StrEnum
@@ -91,14 +93,22 @@ class CandleSeries:
     key: CandleSeriesKey
     frame: pd.DataFrame
     funding_available: bool
+    provenance: dict[str, object] | None = None
 
     @classmethod
-    def from_frame(cls, key: CandleSeriesKey, frame: pd.DataFrame) -> "CandleSeries":
+    def from_frame(
+        cls,
+        key: CandleSeriesKey,
+        frame: pd.DataFrame,
+        *,
+        provenance: dict[str, object] | None = None,
+    ) -> "CandleSeries":
         normalized = validate_ohlcv(frame, key.timeframe, key=key)
         return cls(
             key=key,
             frame=normalized,
             funding_available="funding_rate" in normalized.columns,
+            provenance=provenance,
         )
 
 
@@ -126,7 +136,8 @@ def load_ohlcv_csv(
         frame.columns = list(OHLCV_COLUMNS)
     else:
         frame = pd.read_csv(source)
-    return CandleSeries.from_frame(key, frame)
+    provenance = _load_provenance(source, key)
+    return CandleSeries.from_frame(key, frame, provenance=provenance)
 
 
 def select_period(
@@ -152,7 +163,11 @@ def select_period(
         selected = selected.loc[selected["timestamp"] < end_timestamp]
     if selected.empty:
         raise CandleDataError("selected period contains no candles")
-    return CandleSeries.from_frame(series.key, selected.reset_index(drop=True))
+    return CandleSeries.from_frame(
+        series.key,
+        selected.reset_index(drop=True),
+        provenance=series.provenance,
+    )
 
 
 def validate_ohlcv(
@@ -294,6 +309,50 @@ def _parse_timestamps(values: pd.Series) -> pd.Series:
     else:
         unit = "s"
     return pd.to_datetime(numeric, unit=unit, utc=True, errors="coerce")
+
+
+def provenance_path(csv_path: Path | str) -> Path:
+    """Return the sidecar path used for reproducible source metadata."""
+
+    source = Path(csv_path)
+    return source.with_suffix(source.suffix + ".manifest.json")
+
+
+def _load_provenance(
+    source: Path,
+    key: CandleSeriesKey,
+) -> dict[str, object] | None:
+    manifest_path = provenance_path(source)
+    if not manifest_path.exists():
+        return None
+    try:
+        payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise CandleDataError(f"invalid provenance manifest: {manifest_path}") from exc
+    if not isinstance(payload, dict):
+        raise CandleDataError("provenance manifest root must be an object")
+
+    expected_identity = {
+        "source_exchange": key.exchange,
+        "market_type": str(key.market_type),
+        "symbol": key.symbol,
+        "timeframe": key.timeframe,
+    }
+    for field, expected in expected_identity.items():
+        value = payload.get(field)
+        if not isinstance(value, str) or value.lower() != expected.lower():
+            raise CandleDataError(f"provenance {field} does not match series identity")
+
+    canonical = payload.get("canonical_csv")
+    if not isinstance(canonical, dict):
+        raise CandleDataError("provenance canonical_csv must be an object")
+    expected_hash = canonical.get("sha256")
+    if not isinstance(expected_hash, str) or len(expected_hash) != 64:
+        raise CandleDataError("provenance canonical CSV hash is invalid")
+    actual_hash = hashlib.sha256(source.read_bytes()).hexdigest()
+    if actual_hash.lower() != expected_hash.lower():
+        raise CandleDataError("canonical CSV does not match provenance hash")
+    return payload
 
 
 def _timeframe_ms(timeframe: str) -> int:

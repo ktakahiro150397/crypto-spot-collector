@@ -28,7 +28,8 @@ submit an order.
 
 Every input series is identified by all of these fields:
 
-- exchange (`hyperliquid` for the initial target);
+- exchange (`hyperliquid` for native data, or `binance` for an explicit proxy
+  run);
 - market type (`perpetual`);
 - normalized symbol (for example `ETH/USDC:USDC`);
 - timeframe; and
@@ -118,6 +119,40 @@ fully realized and comparable result. Reports contain:
 Identical validated input and configuration must produce byte-equivalent
 summary values and deterministic ledger/equity rows.
 
+## Downloading Binance USD-M proxy data
+
+Binance Data Vision publishes official USD-M Futures kline archives as daily
+and monthly ZIP files. The repository downloader uses monthly archives for
+complete calendar months and daily archives for partial edge months. It
+downloads each matching `.CHECKSUM`, verifies the archive SHA-256, and only
+then writes a canonical CSV.
+
+The following command downloads ETHUSDT 1-minute candles for January through
+October 2025. `--end` is an exclusive UTC date, so November 1 includes all of
+October:
+
+```bash
+uv run download-binance-futures-data \
+  --symbol ETHUSDT \
+  --canonical-symbol ETH/USDT:USDT \
+  --timeframe 1m \
+  --start 2025-01-01 \
+  --end 2025-11-01 \
+  --output historical_data/binance-usdm-ethusdt-1m-2025-01_2025-10.csv
+```
+
+The output CSV repeats `exchange`, `market_type`, `symbol`, and `timeframe` on
+every row. A neighboring `.csv.manifest.json` records the provider, requested
+range, source URLs, archive hashes, row counts, and final canonical CSV hash.
+The standard loader automatically verifies that sidecar when present. Missing,
+mixed, or tampered identity and hash values fail closed.
+
+These candles describe Binance USD-M perpetual trading, not Hyperliquid. They
+are useful for longer-term strategy research, but exchange-specific price,
+volume, funding, liquidity, and execution differences remain. The backtest
+therefore rejects them unless `--allow-proxy-data` is supplied and marks the
+summary with `data_mode=proxy`, `strategy_exchange=hyperliquid`, and a warning.
+
 ## Running the backtest
 
 After `uv sync`, run the offline CLI with an explicit fee assumption:
@@ -139,10 +174,28 @@ uv run backtest \
 
 The fee is required instead of silently embedding an exchange fee that can
 change. Standard CSV uses the required columns defined above. Raw Binance kline
-CSV can be read with `--csv-format binance_klines`, but the initial engine
-intentionally rejects non-Hyperliquid or non-perpetual identity. Successful
-execution writes `summary.json`, `trades.csv`, and `equity.csv` beneath the
-output directory.
+CSV can be read with `--csv-format binance_klines`, but the checksum-verified
+canonical downloader is preferred. Successful execution writes `summary.json`,
+`trades.csv`, and `equity.csv` beneath the output directory.
+
+For the downloaded Binance proxy series, use its canonical identity and the
+explicit proxy flag:
+
+```bash
+uv run backtest \
+  --input historical_data/binance-usdm-ethusdt-1m-2025-01_2025-10.csv \
+  --exchange binance \
+  --market-type perpetual \
+  --symbol ETH/USDT:USDT \
+  --source-timeframe 1m \
+  --signal-timeframe 30m \
+  --start 2025-01-01T00:00:00Z \
+  --end 2025-11-01T00:00:00Z \
+  --taker-fee-bps <assumed-taker-fee-bps> \
+  --slippage-bps <assumed-slippage-bps> \
+  --allow-proxy-data \
+  --output-dir backtest_results/binance-proxy-eth-2025-01_2025-10
+```
 
 ## Required verification
 
@@ -150,4 +203,5 @@ Automated tests must cover data identity and validation, correct OHLCV
 aggregation, incomplete buckets, exact closed-candle signal timing, next-open
 fills, adverse slippage and fees, long/short TP and SL, same-candle TP/SL
 collision, opposite-SAR close, trailing activation/update, optional funding,
-end-of-data close, metrics, and deterministic CLI artifacts.
+end-of-data close, metrics, deterministic CLI artifacts, archive checksum
+failure, provenance hash tampering, and explicit proxy-mode authorization.

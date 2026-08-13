@@ -51,6 +51,7 @@ class BacktestConfig:
     sar_step: float = 0.02
     sar_max_step: float = 0.2
     close_open_position_at_end: bool = True
+    allow_proxy_data: bool = False
 
     def validate(self, source_timeframe: str) -> None:
         positive_values = {
@@ -152,7 +153,7 @@ TRADE_COLUMNS = [
 
 
 class PerpetualSarBacktester:
-    """Replay one Hyperliquid perpetual series without external I/O."""
+    """Replay the Hyperliquid strategy with native or explicit proxy data."""
 
     def __init__(
         self,
@@ -168,11 +169,17 @@ class PerpetualSarBacktester:
         self._reset()
 
     def run(self, series: CandleSeries) -> BacktestResult:
-        if series.key.exchange != "hyperliquid" or (
-            series.key.market_type is not MarketType.PERPETUAL
-        ):
+        if series.key.market_type is not MarketType.PERPETUAL:
             raise BacktestConfigError(
-                "the first backtest target requires Hyperliquid perpetual data"
+                "the perpetual SAR strategy requires perpetual candle data"
+            )
+        if series.key.exchange not in {"hyperliquid", "binance"}:
+            raise BacktestConfigError(
+                f"unsupported perpetual data exchange: {series.key.exchange}"
+            )
+        if series.key.exchange != "hyperliquid" and not self.config.allow_proxy_data:
+            raise BacktestConfigError(
+                "non-Hyperliquid data requires explicit allow_proxy_data"
             )
         self.config.validate(series.key.timeframe)
         self._reset()
@@ -450,6 +457,17 @@ class PerpetualSarBacktester:
         last_open = pd.Timestamp(series.frame.iloc[-1]["timestamp"])
         return {
             "series": series.key.as_dict(),
+            "strategy_exchange": "hyperliquid",
+            "data_mode": (
+                "native" if series.key.exchange == "hyperliquid" else "proxy"
+            ),
+            "proxy_warning": (
+                None
+                if series.key.exchange == "hyperliquid"
+                else "Results use Binance prices, volume, and market microstructure; "
+                "they do not reproduce Hyperliquid execution."
+            ),
+            "data_provenance": series.provenance,
             "data_range": {
                 "start": first_open.isoformat(),
                 "end": (last_open + pd.Timedelta(milliseconds=source_ms)).isoformat(),

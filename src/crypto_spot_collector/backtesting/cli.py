@@ -7,9 +7,11 @@ import json
 from collections.abc import Sequence
 from pathlib import Path
 
+from loguru import logger
+
 from .data import (
-    CSVFormat,
     CandleSeriesKey,
+    CSVFormat,
     MarketType,
     load_ohlcv_csv,
     select_period,
@@ -20,7 +22,10 @@ from .reporting import write_backtest_report
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Replay the Hyperliquid perpetual SAR strategy offline."
+        description=(
+            "Replay the Hyperliquid perpetual SAR strategy offline with native "
+            "or explicitly permitted proxy candles."
+        )
     )
     parser.add_argument("--input", required=True, type=Path)
     parser.add_argument(
@@ -50,6 +55,19 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--sar-close-consecutive-count", type=int, default=2)
     parser.add_argument("--taker-fee-bps", type=float, required=True)
     parser.add_argument("--slippage-bps", type=float, default=0.0)
+    parser.add_argument(
+        "--allow-proxy-data",
+        action="store_true",
+        help=(
+            "Permit supported non-Hyperliquid perpetual candles and mark the "
+            "result as a proxy backtest"
+        ),
+    )
+    parser.add_argument(
+        "--verbose",
+        action="store_true",
+        help="Show strategy and trailing-stop diagnostic logs",
+    )
     parser.add_argument("--output-dir", required=True, type=Path)
     return parser
 
@@ -81,8 +99,15 @@ def main(argv: Sequence[str] | None = None) -> int:
         sar_close_consecutive_count=args.sar_close_consecutive_count,
         taker_fee_bps=args.taker_fee_bps,
         slippage_bps=args.slippage_bps,
+        allow_proxy_data=args.allow_proxy_data,
     )
-    result = PerpetualSarBacktester(config).run(series)
+    if not args.verbose:
+        logger.disable("crypto_spot_collector")
+    try:
+        result = PerpetualSarBacktester(config).run(series)
+    finally:
+        if not args.verbose:
+            logger.enable("crypto_spot_collector")
     paths = write_backtest_report(result, args.output_dir)
     print(json.dumps({name: str(path) for name, path in paths.items()}, sort_keys=True))
     return 0
