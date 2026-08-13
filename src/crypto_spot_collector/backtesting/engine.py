@@ -21,7 +21,7 @@ from crypto_spot_collector.trading.strategy import (
     evaluate_sar_signal,
 )
 
-from .data import CandleSeries, MarketType, resample_ohlcv
+from .data import CandleSeries, CandleSeriesKey, MarketType, resample_ohlcv
 
 
 class BacktestConfigError(ValueError):
@@ -136,6 +136,23 @@ class BacktestResult:
 
 
 SignalEvaluator = Callable[[pd.DataFrame], SarSignalDecision]
+
+
+@dataclass(frozen=True)
+class PreparedSarSignals:
+    """Precomputed SAR decisions reusable across execution-only parameters."""
+
+    series_key: CandleSeriesKey
+    source_start_ms: int
+    source_end_ms: int
+    source_candle_count: int
+    signal_timeframe: str
+    sar_step: float
+    sar_max_step: float
+    sar_consecutive_count: int
+    decisions_by_close_ms: dict[int, SarSignalDecision]
+
+
 TRADE_COLUMNS = [
     "entry_time",
     "exit_time",
@@ -168,56 +185,91 @@ class PerpetualSarBacktester:
         )
         self._reset()
 
-    def run(self, series: CandleSeries) -> BacktestResult:
-        if series.key.market_type is not MarketType.PERPETUAL:
-            raise BacktestConfigError(
-                "the perpetual SAR strategy requires perpetual candle data"
-            )
-        if series.key.exchange not in {"hyperliquid", "binance"}:
-            raise BacktestConfigError(
-                f"unsupported perpetual data exchange: {series.key.exchange}"
-            )
-        if series.key.exchange != "hyperliquid" and not self.config.allow_proxy_data:
-            raise BacktestConfigError(
-                "non-Hyperliquid data requires explicit allow_proxy_data"
-            )
+    def prepare_signals(self, series: CandleSeries) -> PreparedSarSignals:
+        """Prepare decisions once for repeated execution-parameter runs."""
+
+        self._validate_series(series)
         self.config.validate(series.key.timeframe)
-        self._reset()
-        base = series.frame.copy()
         signal_columns = ["timestamp", "open", "high", "low", "close", "volume"]
         if self.config.signal_timeframe == series.key.timeframe:
-            signals = base.loc[:, signal_columns]
+            signals = series.frame.loc[:, signal_columns]
         else:
             signals = resample_ohlcv(
-                base,
+                series.frame,
                 source_timeframe=series.key.timeframe,
                 target_timeframe=self.config.signal_timeframe,
             )
         signals = _with_sar(signals, self.config.sar_step, self.config.sar_max_step)
-        signal_close_index = self._signal_close_index(signals)
-        source_ms = _timeframe_ms(series.key.timeframe)
+        signal_ms = _timeframe_ms(self.config.signal_timeframe)
+        decisions: dict[int, SarSignalDecision] = {}
+        for index, timestamp in enumerate(signals["timestamp"]):
+            close_ms = int(pd.Timestamp(timestamp).timestamp() * 1000) + signal_ms
+            decisions[close_ms] = self._signal_evaluator(signals.iloc[: index + 1])
+        return PreparedSarSignals(
+            series_key=series.key,
+            source_start_ms=_timestamp_ms(series.frame.iloc[0]["timestamp"]),
+            source_end_ms=_timestamp_ms(series.frame.iloc[-1]["timestamp"]),
+            source_candle_count=len(series.frame),
+            signal_timeframe=self.config.signal_timeframe,
+            sar_step=self.config.sar_step,
+            sar_max_step=self.config.sar_max_step,
+            sar_consecutive_count=self.config.sar_consecutive_count,
+            decisions_by_close_ms=decisions,
+        )
 
-        for _, candle in base.iterrows():
-            timestamp = pd.Timestamp(candle["timestamp"])
+    def run(
+        self,
+        series: CandleSeries,
+        *,
+        prepared_signals: PreparedSarSignals | None = None,
+    ) -> BacktestResult:
+        self._validate_series(series)
+        self.config.validate(series.key.timeframe)
+        prepared = prepared_signals or self.prepare_signals(series)
+        self._validate_prepared_signals(series, prepared)
+        self._reset()
+        base = series.frame
+        source_ms = _timeframe_ms(series.key.timeframe)
+        source_delta = pd.Timedelta(milliseconds=source_ms)
+        timestamps = base["timestamp"].array
+        opens = base["open"].to_numpy(dtype=float, copy=False)
+        highs = base["high"].to_numpy(dtype=float, copy=False)
+        lows = base["low"].to_numpy(dtype=float, copy=False)
+        closes = base["close"].to_numpy(dtype=float, copy=False)
+        funding_rates = (
+            base["funding_rate"].to_numpy(dtype=float, copy=False)
+            if "funding_rate" in base.columns
+            else None
+        )
+
+        for index in range(len(base)):
+            timestamp = pd.Timestamp(timestamps[index])
+            open_price = float(opens[index])
+            close_price = float(closes[index])
             if self._pending_action is not None:
-                self._execute_pending(timestamp, float(candle["open"]))
-            self._evaluate_protection(timestamp, candle)
-            self._apply_funding(candle)
-            candle_close = timestamp + pd.Timedelta(milliseconds=source_ms)
-            self._record_equity(candle_close, float(candle["close"]))
-            self._update_trailing(candle_close, float(candle["close"]), source_ms)
+                self._execute_pending(timestamp, open_price)
+            self._evaluate_protection(
+                timestamp,
+                candle_open=open_price,
+                high=float(highs[index]),
+                low=float(lows[index]),
+            )
+            funding_rate = (
+                float(funding_rates[index]) if funding_rates is not None else None
+            )
+            self._apply_funding(close_price, funding_rate)
+            candle_close = timestamp + source_delta
+            self._record_equity(candle_close, close_price)
+            self._update_trailing(candle_close, close_price, source_ms)
 
             close_ms = int(candle_close.timestamp() * 1000)
-            signal_index = signal_close_index.get(close_ms)
-            if signal_index is not None:
-                self._evaluate_signal(signals.iloc[: signal_index + 1])
+            decision = prepared.decisions_by_close_ms.get(close_ms)
+            if decision is not None:
+                self._apply_signal_decision(decision)
 
         if self._position is not None and self.config.close_open_position_at_end:
-            final = base.iloc[-1]
-            final_time = pd.Timestamp(final["timestamp"]) + pd.Timedelta(
-                milliseconds=source_ms
-            )
-            fill = self._adverse_fill(float(final["close"]), self._exit_order_side())
+            final_time = pd.Timestamp(timestamps[-1]) + source_delta
+            fill = self._adverse_fill(float(closes[-1]), self._exit_order_side())
             self._close_position(final_time, fill, "end_of_data")
             self._equity_rows[-1]["equity"] = self._cash
 
@@ -232,6 +284,50 @@ class PerpetualSarBacktester:
             equity_curve=equity,
         )
 
+    def _validate_series(self, series: CandleSeries) -> None:
+        if series.key.market_type is not MarketType.PERPETUAL:
+            raise BacktestConfigError(
+                "the perpetual SAR strategy requires perpetual candle data"
+            )
+        if series.key.exchange not in {"hyperliquid", "binance"}:
+            raise BacktestConfigError(
+                f"unsupported perpetual data exchange: {series.key.exchange}"
+            )
+        if series.key.exchange != "hyperliquid" and not self.config.allow_proxy_data:
+            raise BacktestConfigError(
+                "non-Hyperliquid data requires explicit allow_proxy_data"
+            )
+
+    def _validate_prepared_signals(
+        self,
+        series: CandleSeries,
+        prepared: PreparedSarSignals,
+    ) -> None:
+        expected = (
+            series.key,
+            _timestamp_ms(series.frame.iloc[0]["timestamp"]),
+            _timestamp_ms(series.frame.iloc[-1]["timestamp"]),
+            len(series.frame),
+            self.config.signal_timeframe,
+            self.config.sar_step,
+            self.config.sar_max_step,
+            self.config.sar_consecutive_count,
+        )
+        actual = (
+            prepared.series_key,
+            prepared.source_start_ms,
+            prepared.source_end_ms,
+            prepared.source_candle_count,
+            prepared.signal_timeframe,
+            prepared.sar_step,
+            prepared.sar_max_step,
+            prepared.sar_consecutive_count,
+        )
+        if actual != expected:
+            raise BacktestConfigError(
+                "prepared SAR signals do not match series or signal configuration"
+            )
+
     def _reset(self) -> None:
         self._cash = self.config.initial_equity
         self._position: OpenPosition | None = None
@@ -241,15 +337,7 @@ class PerpetualSarBacktester:
         self._trades: list[TradeRecord] = []
         self._equity_rows: list[dict[str, object]] = []
 
-    def _signal_close_index(self, signals: pd.DataFrame) -> dict[int, int]:
-        signal_ms = _timeframe_ms(self.config.signal_timeframe)
-        return {
-            int(pd.Timestamp(timestamp).timestamp() * 1000) + signal_ms: index
-            for index, timestamp in enumerate(signals["timestamp"])
-        }
-
-    def _evaluate_signal(self, available: pd.DataFrame) -> None:
-        decision = self._signal_evaluator(available)
+    def _apply_signal_decision(self, decision: SarSignalDecision) -> None:
         if decision.direction is None:
             return
         if decision.long_signal and decision.short_signal:
@@ -318,15 +406,19 @@ class PerpetualSarBacktester:
             initial_stoploss_price=stop_loss,
         )
 
-    def _evaluate_protection(self, timestamp: pd.Timestamp, candle: pd.Series) -> None:
+    def _evaluate_protection(
+        self,
+        timestamp: pd.Timestamp,
+        *,
+        candle_open: float,
+        high: float,
+        low: float,
+    ) -> None:
         if self._position is None:
             return
         trailing = self._trailing.get_position("backtest")
         if trailing is None:
             raise RuntimeError("backtest trailing state is missing")
-        candle_open = float(candle["open"])
-        high = float(candle["high"])
-        low = float(candle["low"])
         stop = trailing.current_stoploss_price
         target = self._position.take_profit_price
         if self._position.side is PositionSide.LONG:
@@ -346,13 +438,16 @@ class PerpetualSarBacktester:
             fill = self._adverse_fill(target, self._exit_order_side())
             self._close_position(timestamp, fill, "take_profit")
 
-    def _apply_funding(self, candle: pd.Series) -> None:
-        if self._position is None or "funding_rate" not in candle.index:
+    def _apply_funding(
+        self,
+        close_price: float,
+        funding_rate: float | None,
+    ) -> None:
+        if self._position is None or funding_rate is None:
             return
-        rate = float(candle["funding_rate"])
         direction = 1 if self._position.side is PositionSide.LONG else -1
-        notional = self._position.quantity * float(candle["close"])
-        payment = direction * notional * rate
+        notional = self._position.quantity * close_price
+        payment = direction * notional * funding_rate
         self._cash -= payment
         self._position.funding_paid += payment
 
@@ -520,3 +615,7 @@ def _timeframe_ms(timeframe: str) -> int:
         return int(timeframe_milliseconds(timeframe))
     except ValueError as exc:
         raise BacktestConfigError(str(exc)) from exc
+
+
+def _timestamp_ms(value: object) -> int:
+    return int(pd.Timestamp(value).timestamp() * 1_000)

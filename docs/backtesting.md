@@ -197,6 +197,48 @@ uv run backtest \
   --output-dir backtest_results/binance-proxy-eth-2025-01_2025-10
 ```
 
+## Searching timeframes and protection parameters
+
+`backtest-sweep` performs a deterministic grid search on a training period.
+It locks the existing baseline, the highest-return candidate, and a
+drawdown/monthly-variability-adjusted candidate before it evaluates the
+exclusive holdout period. This prevents the holdout result from silently
+becoming another selection input.
+
+The following reproduces the initial ETH search documented in
+[`backtest-parameter-analysis.md`](backtest-parameter-analysis.md):
+
+```bash
+uv run backtest-sweep \
+  --input historical_data/binance-usdm-ethusdt-1m-2025-01_2025-10.csv \
+  --exchange binance \
+  --market-type perpetual \
+  --symbol ETH/USDT:USDT \
+  --source-timeframe 1m \
+  --train-start 2025-01-01T00:00:00Z \
+  --holdout-start 2025-07-01T00:00:00Z \
+  --end 2025-11-01T00:00:00Z \
+  --signal-timeframes 5m,15m,30m,1h,2h,4h \
+  --take-profit-roes 8,15,25 \
+  --stop-loss-roes 1.5,3,6 \
+  --trailing-activation-roes 3,7 \
+  --trailing-interval-minutes 3 \
+  --initial-equity 1000 \
+  --order-notional 12 \
+  --leverage 3 \
+  --sar-consecutive-count 4 \
+  --sar-close-consecutive-count 2 \
+  --taker-fee-bps 5 \
+  --slippage-bps 1 \
+  --workers 6 \
+  --output-dir backtest_results/parameter-sweep-2025
+```
+
+The output contains every training result, the locked-candidate evaluation,
+a machine-readable summary, and a short Markdown report. Search output is
+ignored by Git because it can be regenerated from the checksum-verified
+source CSV and the command above.
+
 ## Required verification
 
 Automated tests must cover data identity and validation, correct OHLCV

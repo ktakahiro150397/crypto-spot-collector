@@ -254,3 +254,27 @@ def test_binance_proxy_requires_explicit_permission_and_marks_summary() -> None:
     assert result.summary["strategy_exchange"] == "hyperliquid"
     assert result.summary["data_mode"] == "proxy"
     assert "Binance prices" in str(result.summary["proxy_warning"])
+
+
+def test_prepared_sar_signals_are_reusable_and_configuration_checked() -> None:
+    series = _series(_flat_rows(4))
+    evaluator = _evaluator({"00:00": SarSignalDecision("long", True, False)})
+    backtester = PerpetualSarBacktester(_config(), signal_evaluator=evaluator)
+    prepared = backtester.prepare_signals(series)
+
+    cached = backtester.run(series, prepared_signals=prepared)
+    uncached = backtester.run(series)
+
+    pd.testing.assert_frame_equal(cached.trades, uncached.trades)
+    pd.testing.assert_frame_equal(cached.equity_curve, uncached.equity_curve)
+
+    mismatched = PerpetualSarBacktester(
+        _config(signal_timeframe="2m"),
+        signal_evaluator=evaluator,
+    )
+    with pytest.raises(BacktestConfigError, match="prepared SAR signals"):
+        mismatched.run(series, prepared_signals=prepared)
+
+    other_period = _series(_flat_rows(5))
+    with pytest.raises(BacktestConfigError, match="prepared SAR signals"):
+        backtester.run(other_period, prepared_signals=prepared)

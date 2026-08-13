@@ -24,6 +24,7 @@ from .engine import (
     BacktestConfigError,
     BacktestResult,
     PerpetualSarBacktester,
+    PreparedSarSignals,
     TradeRecord,
 )
 from .reporting import write_backtest_report
@@ -41,6 +42,7 @@ __all__ = [
     "DownloadResult",
     "MarketType",
     "PerpetualSarBacktester",
+    "PreparedSarSignals",
     "TradeRecord",
     "download_binance_usdm_klines",
     "load_ohlcv_csv",
