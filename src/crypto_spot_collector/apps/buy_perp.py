@@ -661,22 +661,6 @@ async def close_position_notification_loop() -> None:
         logger.error("userFills loop terminated.")
 
 
-async def heartbeat_loop(interval_seconds: float = 900.0) -> None:
-    while True:
-        await asyncio.sleep(interval_seconds)
-        metrics = hyperliquid_exchange.rest.metrics
-        retries = sum(item.retries for item in metrics.values())
-        failures = sum(item.failures for item in metrics.values())
-        await notificator.send_notification_async(
-            message=(
-                f"Hyperliquid bot heartbeat: network={trading_config.network.value}, "
-                f"ws_reconnects={hyperliquid_exchange.ws_client.reconnect_count}, "
-                f"rest_retries={retries}, rest_failures={failures}"
-            ),
-            files=[],
-        )
-
-
 async def health_pulse_loop(interval_seconds: float = 20.0) -> None:
     while True:
         runtime_state.health.write("running")
@@ -1528,7 +1512,6 @@ async def main() -> None:
                 signal_check_loop(),
                 trailing_stop_loop(),
                 close_position_notification_loop(),
-                heartbeat_loop(),
                 health_pulse_loop(),
             ]
         )
