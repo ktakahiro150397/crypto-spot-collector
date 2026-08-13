@@ -1478,6 +1478,7 @@ async def main() -> None:
     supervisor.install_signal_handlers()
 
     try:
+        await hyperliquid_exchange.validate_api_wallet_authorization()
         recovered_orders = await order_executor.recover_unsettled()
         unresolved = [
             order

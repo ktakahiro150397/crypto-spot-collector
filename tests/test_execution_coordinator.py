@@ -273,6 +273,14 @@ class FakeCcxtExchange:
         return {"status": "ok", "response": {"type": "default"}}
 
 
+class FakePublicExchange:
+    def __init__(self, role: dict[str, Any]) -> None:
+        self.role = role
+
+    async def public_post_info(self, _request: dict[str, str]) -> dict[str, Any]:
+        return self.role
+
+
 def bare_exchange() -> HyperLiquidExchange:
     exchange = object.__new__(HyperLiquidExchange)
     exchange.exchange_private = FakeCcxtExchange()
@@ -329,6 +337,45 @@ async def test_notional_cap_fails_when_safe_amount_is_below_exchange_minimum() -
             reference_price=1000,
             max_notional=9.9,
         )
+
+
+@pytest.mark.asyncio
+async def test_api_wallet_must_be_authorized_for_main_wallet() -> None:
+    exchange = bare_exchange()
+    exchange.main_wallet_address = "0xmain"
+    exchange.api_wallet_address = "0xagent"
+    exchange.exchange_public = FakePublicExchange(
+        {"role": "agent", "data": {"user": "0xMAIN"}}
+    )
+
+    await exchange.validate_api_wallet_authorization()
+
+    exchange.exchange_public = FakePublicExchange({"role": "missing"})
+    with pytest.raises(RuntimeError, match="not authorized"):
+        await exchange.validate_api_wallet_authorization()
+
+
+@pytest.mark.asyncio
+async def test_main_wallet_signer_is_valid_for_same_main_account() -> None:
+    exchange = bare_exchange()
+    exchange.main_wallet_address = "0xmain"
+    exchange.api_wallet_address = "0xMAIN"
+    exchange.exchange_public = FakePublicExchange({"role": "user"})
+
+    await exchange.validate_api_wallet_authorization()
+
+
+@pytest.mark.asyncio
+async def test_api_wallet_authorized_for_another_main_wallet_is_rejected() -> None:
+    exchange = bare_exchange()
+    exchange.main_wallet_address = "0xmain"
+    exchange.api_wallet_address = "0xagent"
+    exchange.exchange_public = FakePublicExchange(
+        {"role": "agent", "data": {"user": "0xother"}}
+    )
+
+    with pytest.raises(RuntimeError, match="not authorized"):
+        await exchange.validate_api_wallet_authorization()
 
 
 @pytest.mark.asyncio

@@ -71,6 +71,7 @@ class HyperLiquidExchange(IExchange):
         testnet = trading_config.testnet
         logger.info("Initializing HyperLiquid exchange client")
         self.main_wallet_address = mainWalletAddress
+        self.api_wallet_address = apiWalletAddress
         if privateKey and not privateKey.startswith("0x"):
             privateKey = "0x" + privateKey
         exchange_type = HyperLiquidPerpOnly
@@ -82,7 +83,9 @@ class HyperLiquidExchange(IExchange):
 
         self.exchange_private = exchange_type(
             {
-                "walletAddress": apiWalletAddress,
+                # Hyperliquid API wallets sign for the funded main account.
+                # Account queries must always use the main account address.
+                "walletAddress": mainWalletAddress,
                 "privateKey": privateKey,
             }
         )
@@ -199,6 +202,33 @@ class HyperLiquidExchange(IExchange):
         """Return the latest traded price for protection safety checks."""
         ticker = await self.fetch_price_async(symbol)
         return float(ticker.get("last") or ticker.get("close") or 0)
+
+    async def validate_api_wallet_authorization(self) -> None:
+        """Require the configured API wallet to be an agent of the main account."""
+
+        role = await self.rest.call(
+            "fetch_api_wallet_role",
+            lambda: self.exchange_public.public_post_info(
+                {
+                    "type": "userRole",
+                    "user": self.api_wallet_address,
+                }
+            ),
+        )
+        role_data = role.get("data", {}) if isinstance(role, dict) else {}
+        authorized_main = str(role_data.get("user") or "")
+        role_name = role.get("role") if isinstance(role, dict) else None
+        main_address = self.main_wallet_address.lower()
+        api_address = self.api_wallet_address.lower()
+        direct_main_signer = role_name == "user" and api_address == main_address
+        authorized_agent = (
+            role_name == "agent" and authorized_main.lower() == main_address
+        )
+        if not direct_main_signer and not authorized_agent:
+            raise RuntimeError(
+                "Hyperliquid API wallet is not authorized for the configured "
+                "main wallet"
+            )
 
     async def submit_market_order(self, intent: OrderIntent) -> dict[str, Any]:
         """Submit an intent using its deterministic Hyperliquid cloid."""
