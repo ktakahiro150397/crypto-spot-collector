@@ -244,6 +244,36 @@ async def test_reservations_block_concentrated_or_multiple_signals(
 
 
 @pytest.mark.asyncio
+async def test_phase1_reserves_parallel_eth_and_btc_positions(
+    tmp_path: Path,
+) -> None:
+    adapter = FakeRiskAdapter()
+    risk = guard(
+        adapter,
+        tmp_path,
+        amount_usdc=12.5,
+        leverage=1,
+        max_order_notional_usdc=12.5,
+        max_symbol_notional_usdc=12.5,
+        max_total_notional_usdc=25.0,
+        max_positions=2,
+        max_leverage=1,
+    )
+
+    eth = await risk.reserve_entry(symbol=ETH, amount=0.125, price=100)
+    btc = await risk.reserve_entry(symbol=BTC, amount=0.125, price=100)
+
+    assert eth.notional == 12.5
+    assert btc.notional == 12.5
+
+    with pytest.raises(EntryRiskError, match="position count"):
+        await risk.reserve_entry(symbol=ETH, amount=0.125, price=100)
+
+    await risk.release(eth)
+    await risk.release(btc)
+
+
+@pytest.mark.asyncio
 async def test_entry_kill_switch_does_not_touch_non_entry_execution(
     tmp_path: Path,
 ) -> None:
