@@ -252,6 +252,23 @@ The full command and interpretation are recorded in
 As with the coarse parameter search, only the training phase selects nominees;
 holdout and confirmation results cannot change the selected variants.
 
+## Comparing SAR and non-SAR technical strategies
+
+`backtest-strategy-search` applies the same event-driven executor to SAR,
+EMA-price, EMA-crossover, Donchian, time-series momentum, and RSI/Bollinger
+signals. Its `search` command registers the full signal/exit grid before it
+loads validation data, screens at three-minute execution resolution, and
+replays frozen finalists at one-minute resolution. The `confirm` command only
+accepts an already locked candidate and hashes every validation CSV. The
+optional `promote` step freezes an intermediate winner before a second,
+untouched holdout.
+
+The exact grid, commands, results, and final rejection decision from the first
+multi-strategy experiment are documented in
+[`backtest-strategy-exploration.md`](backtest-strategy-exploration.md). Search
+and confirmation artifacts are intentionally ignored by Git and can be
+regenerated from the checksum-verified source files.
+
 ## Required verification
 
 Automated tests must cover data identity and validation, correct OHLCV

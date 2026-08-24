@@ -12,6 +12,7 @@ from crypto_spot_collector.backtesting.engine import (
     BacktestConfig,
     BacktestConfigError,
     PerpetualSarBacktester,
+    PreparedStrategySignals,
 )
 from crypto_spot_collector.backtesting.regime import (
     EntryFilterConfig,
@@ -184,6 +185,75 @@ def test_consecutive_opposite_sar_closes_at_following_open() -> None:
     trade = result.trades.iloc[0]
     assert trade["exit_reason"] == "opposite_sar"
     assert trade["exit_time"] == "2026-01-01T00:03:00+00:00"
+
+
+def test_generic_prepared_signal_is_identified_and_uses_generic_exit_reason() -> None:
+    series = _series(_flat_rows(4))
+    timestamps = series.frame["timestamp"]
+    close_ms = [
+        int(pd.Timestamp(timestamp).timestamp() * 1_000) + 60_000
+        for timestamp in timestamps
+    ]
+    prepared = PreparedStrategySignals(
+        series_key=series.key,
+        source_start_ms=int(pd.Timestamp(timestamps.iloc[0]).timestamp() * 1_000),
+        source_end_ms=int(pd.Timestamp(timestamps.iloc[-1]).timestamp() * 1_000),
+        source_candle_count=len(series.frame),
+        signal_timeframe="1m",
+        strategy_id="ema_price|tf=1m|side=both|ema=2|confirm=1",
+        decisions_by_close_ms={
+            close_ms[0]: SarSignalDecision("long", True, False),
+            close_ms[1]: SarSignalDecision("short", False, False),
+            close_ms[2]: SarSignalDecision("short", False, False),
+        },
+    )
+
+    result = PerpetualSarBacktester(_config()).run(
+        series,
+        prepared_signals=prepared,
+    )
+
+    assert result.summary["signal_strategy_id"] == prepared.strategy_id
+    assert result.trades.iloc[0]["exit_reason"] == "opposite_signal"
+
+
+def test_sampled_equity_curve_keeps_exact_intraperiod_drawdown() -> None:
+    series = _series(
+        [
+            {"open": 100, "high": 100, "low": 100, "close": 100},
+            {"open": 100, "high": 100, "low": 90, "close": 90},
+            {"open": 90, "high": 100, "low": 90, "close": 100},
+        ]
+    )
+    evaluator = _evaluator({"00:00": SarSignalDecision("long", True, False)})
+    result = PerpetualSarBacktester(
+        _config(
+            stop_loss_roe=50.0,
+            take_profit_roe=50.0,
+            trailing_activation_roe=25.0,
+            equity_curve_interval_minutes=60,
+        ),
+        signal_evaluator=evaluator,
+    ).run(series)
+
+    assert len(result.equity_curve) == 1
+    assert result.summary["max_drawdown_percent"] == pytest.approx(1.0)
+
+
+def test_sampled_equity_curve_records_final_flat_equity_without_trades() -> None:
+    result = PerpetualSarBacktester(
+        _config(equity_curve_interval_minutes=60),
+        signal_evaluator=_evaluator({}),
+    ).run(_series(_flat_rows(3)))
+
+    assert result.summary["trade_count"] == 0
+    assert result.equity_curve.to_dict(orient="records") == [
+        {"timestamp": "2026-01-01T00:03:00+00:00", "equity": 1_000.0}
+    ]
+
+
+def test_default_equity_sampling_accepts_an_hourly_source() -> None:
+    BacktestConfig(signal_timeframe="1h", trailing_interval_minutes=60).validate("1h")
 
 
 def test_positive_funding_is_charged_to_long() -> None:

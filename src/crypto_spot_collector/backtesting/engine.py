@@ -53,6 +53,7 @@ class BacktestConfig:
     sar_max_step: float = 0.2
     close_open_position_at_end: bool = True
     allow_proxy_data: bool = False
+    equity_curve_interval_minutes: int = 1
 
     def validate(self, source_timeframe: str) -> None:
         positive_values = {
@@ -75,6 +76,8 @@ class BacktestConfig:
             )
         if self.trailing_interval_minutes <= 0:
             raise BacktestConfigError("trailing interval must be positive")
+        if self.equity_curve_interval_minutes <= 0:
+            raise BacktestConfigError("equity curve interval must be positive")
         if self.sar_consecutive_count <= 0 or self.sar_close_consecutive_count <= 0:
             raise BacktestConfigError("SAR consecutive counts must be positive")
         if self.taker_fee_bps < 0 or not math.isfinite(self.taker_fee_bps):
@@ -91,6 +94,13 @@ class BacktestConfig:
         if trailing_ms % source_ms != 0:
             raise BacktestConfigError(
                 "source timeframe must evenly divide the trailing interval"
+            )
+        equity_interval_ms = self.equity_curve_interval_minutes * 60_000
+        smaller = min(equity_interval_ms, source_ms)
+        larger = max(equity_interval_ms, source_ms)
+        if larger % smaller != 0:
+            raise BacktestConfigError(
+                "source timeframe and equity curve interval must divide evenly"
             )
         if self.order_notional / self.leverage > self.initial_equity:
             raise BacktestConfigError("initial equity does not cover entry margin")
@@ -152,6 +162,22 @@ class PreparedSarSignals:
     sar_max_step: float
     sar_consecutive_count: int
     decisions_by_close_ms: dict[int, SarSignalDecision]
+
+
+@dataclass(frozen=True)
+class PreparedStrategySignals:
+    """Precomputed decisions for a non-SAR strategy under the same executor."""
+
+    series_key: CandleSeriesKey
+    source_start_ms: int
+    source_end_ms: int
+    source_candle_count: int
+    signal_timeframe: str
+    strategy_id: str
+    decisions_by_close_ms: dict[int, SarSignalDecision]
+
+
+PreparedSignals = PreparedSarSignals | PreparedStrategySignals
 
 
 TRADE_COLUMNS = [
@@ -224,7 +250,7 @@ class PerpetualSarBacktester:
         self,
         series: CandleSeries,
         *,
-        prepared_signals: PreparedSarSignals | None = None,
+        prepared_signals: PreparedSignals | None = None,
         prepared_entry_filter: PreparedEntryFilter | None = None,
     ) -> BacktestResult:
         self._validate_series(series)
@@ -239,6 +265,12 @@ class PerpetualSarBacktester:
             if prepared_entry_filter is not None
             else None
         )
+        if isinstance(prepared, PreparedStrategySignals):
+            self._signal_strategy_id = prepared.strategy_id
+            self._opposite_exit_reason = "opposite_signal"
+        else:
+            self._signal_strategy_id = "sar"
+            self._opposite_exit_reason = "opposite_sar"
         base = series.frame
         source_ms = _timeframe_ms(series.key.timeframe)
         source_delta = pd.Timedelta(milliseconds=source_ms)
@@ -288,11 +320,13 @@ class PerpetualSarBacktester:
                     entry_filter_active=prepared_entry_filter is not None,
                 )
 
+        final_time = pd.Timestamp(timestamps[-1]) + source_delta
         if self._position is not None and self.config.close_open_position_at_end:
-            final_time = pd.Timestamp(timestamps[-1]) + source_delta
             fill = self._adverse_fill(float(closes[-1]), self._exit_order_side())
             self._close_position(final_time, fill, "end_of_data")
-            self._equity_rows[-1]["equity"] = self._cash
+            self._finalize_equity(final_time, self._cash)
+        else:
+            self._finalize_equity(final_time, self._latest_equity)
 
         trades = pd.DataFrame(
             [trade.as_dict() for trade in self._trades],
@@ -322,32 +356,46 @@ class PerpetualSarBacktester:
     def _validate_prepared_signals(
         self,
         series: CandleSeries,
-        prepared: PreparedSarSignals,
+        prepared: PreparedSignals,
     ) -> None:
-        expected = (
+        common_expected = (
             series.key,
             _timestamp_ms(series.frame.iloc[0]["timestamp"]),
             _timestamp_ms(series.frame.iloc[-1]["timestamp"]),
             len(series.frame),
             self.config.signal_timeframe,
-            self.config.sar_step,
-            self.config.sar_max_step,
-            self.config.sar_consecutive_count,
         )
-        actual = (
+        common_actual = (
             prepared.series_key,
             prepared.source_start_ms,
             prepared.source_end_ms,
             prepared.source_candle_count,
             prepared.signal_timeframe,
-            prepared.sar_step,
-            prepared.sar_max_step,
-            prepared.sar_consecutive_count,
         )
-        if actual != expected:
-            raise BacktestConfigError(
-                "prepared SAR signals do not match series or signal configuration"
+        if common_actual != common_expected:
+            signal_name = (
+                "prepared SAR signals"
+                if isinstance(prepared, PreparedSarSignals)
+                else "prepared strategy signals"
             )
+            raise BacktestConfigError(
+                f"{signal_name} do not match series or signal configuration"
+            )
+        if isinstance(prepared, PreparedSarSignals):
+            expected_sar = (
+                self.config.sar_step,
+                self.config.sar_max_step,
+                self.config.sar_consecutive_count,
+            )
+            actual_sar = (
+                prepared.sar_step,
+                prepared.sar_max_step,
+                prepared.sar_consecutive_count,
+            )
+            if actual_sar != expected_sar:
+                raise BacktestConfigError(
+                    "prepared SAR signals do not match SAR configuration"
+                )
 
     def _validate_prepared_entry_filter(
         self,
@@ -378,11 +426,16 @@ class PerpetualSarBacktester:
         self._opposite_count = 0
         self._entry_filter_id = None
         self._entry_regime = None
+        self._signal_strategy_id = "sar"
+        self._opposite_exit_reason = "opposite_sar"
         self._entry_signal_count = 0
         self._filtered_entry_signal_count = 0
         self._trailing = TrailingStopManagerHyperLiquid()
         self._trades: list[TradeRecord] = []
         self._equity_rows: list[dict[str, object]] = []
+        self._equity_peak = self.config.initial_equity
+        self._max_drawdown = 0.0
+        self._latest_equity = self.config.initial_equity
 
     def _apply_signal_decision(
         self,
@@ -426,7 +479,7 @@ class PerpetualSarBacktester:
             self._open_position(timestamp, open_price, PositionSide.SHORT)
         elif action is PendingAction.CLOSE and self._position is not None:
             fill = self._adverse_fill(open_price, self._exit_order_side())
-            self._close_position(timestamp, fill, "opposite_sar")
+            self._close_position(timestamp, fill, self._opposite_exit_reason)
 
     def _open_position(
         self,
@@ -583,9 +636,29 @@ class PerpetualSarBacktester:
                 * (mark_price - self._position.entry_price)
                 * self._position.quantity
             )
-        self._equity_rows.append(
-            {"timestamp": timestamp.isoformat(), "equity": self._cash + unrealized}
-        )
+        equity = self._cash + unrealized
+        self._update_drawdown(equity)
+        interval_ms = self.config.equity_curve_interval_minutes * 60_000
+        if int(timestamp.timestamp() * 1_000) % interval_ms == 0:
+            self._equity_rows.append(
+                {"timestamp": timestamp.isoformat(), "equity": equity}
+            )
+
+    def _finalize_equity(self, timestamp: pd.Timestamp, equity: float) -> None:
+        """Record exact post-liquidation equity even with a sampled curve."""
+
+        self._update_drawdown(equity)
+        row = {"timestamp": timestamp.isoformat(), "equity": equity}
+        if self._equity_rows and self._equity_rows[-1]["timestamp"] == row["timestamp"]:
+            self._equity_rows[-1] = row
+        else:
+            self._equity_rows.append(row)
+
+    def _update_drawdown(self, equity: float) -> None:
+        self._latest_equity = equity
+        self._equity_peak = max(self._equity_peak, equity)
+        drawdown = (equity - self._equity_peak) / self._equity_peak
+        self._max_drawdown = min(self._max_drawdown, drawdown)
 
     def _summary(
         self,
@@ -594,9 +667,6 @@ class PerpetualSarBacktester:
         equity: pd.DataFrame,
     ) -> dict[str, object]:
         final_equity = float(equity.iloc[-1]["equity"])
-        equity_values = equity["equity"].astype(float)
-        peaks = equity_values.cummax()
-        drawdowns = (equity_values - peaks) / peaks
         if trades.empty:
             wins = trades
             losses = trades
@@ -631,6 +701,7 @@ class PerpetualSarBacktester:
             "config": asdict(self.config),
             "funding_included": series.funding_available,
             "entry_filter_id": self._entry_filter_id,
+            "signal_strategy_id": self._signal_strategy_id,
             "entry_signal_count": self._entry_signal_count,
             "filtered_entry_signal_count": self._filtered_entry_signal_count,
             "trade_count": trade_count,
@@ -638,7 +709,7 @@ class PerpetualSarBacktester:
             "total_return_percent": (
                 (final_equity / self.config.initial_equity - 1) * 100
             ),
-            "max_drawdown_percent": abs(float(drawdowns.min())) * 100,
+            "max_drawdown_percent": abs(self._max_drawdown) * 100,
             "win_rate_percent": (len(wins) / trade_count * 100) if trade_count else 0.0,
             "profit_factor": profit_factor,
             "final_equity": final_equity,
