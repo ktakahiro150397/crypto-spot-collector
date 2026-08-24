@@ -71,6 +71,7 @@ class HyperLiquidExchange(IExchange):
         testnet = trading_config.testnet
         logger.info("Initializing HyperLiquid exchange client")
         self.main_wallet_address = mainWalletAddress
+        self.api_wallet_address = apiWalletAddress
         if privateKey and not privateKey.startswith("0x"):
             privateKey = "0x" + privateKey
         exchange_type = HyperLiquidPerpOnly
@@ -82,7 +83,9 @@ class HyperLiquidExchange(IExchange):
 
         self.exchange_private = exchange_type(
             {
-                "walletAddress": apiWalletAddress,
+                # Hyperliquid API wallets sign for the funded main account.
+                # Account queries must always use the main account address.
+                "walletAddress": mainWalletAddress,
                 "privateKey": privateKey,
             }
         )
@@ -200,6 +203,33 @@ class HyperLiquidExchange(IExchange):
         ticker = await self.fetch_price_async(symbol)
         return float(ticker.get("last") or ticker.get("close") or 0)
 
+    async def validate_api_wallet_authorization(self) -> None:
+        """Require the configured API wallet to be an agent of the main account."""
+
+        role = await self.rest.call(
+            "fetch_api_wallet_role",
+            lambda: self.exchange_public.public_post_info(
+                {
+                    "type": "userRole",
+                    "user": self.api_wallet_address,
+                }
+            ),
+        )
+        role_data = role.get("data", {}) if isinstance(role, dict) else {}
+        authorized_main = str(role_data.get("user") or "")
+        role_name = role.get("role") if isinstance(role, dict) else None
+        main_address = self.main_wallet_address.lower()
+        api_address = self.api_wallet_address.lower()
+        direct_main_signer = role_name == "user" and api_address == main_address
+        authorized_agent = (
+            role_name == "agent" and authorized_main.lower() == main_address
+        )
+        if not direct_main_signer and not authorized_agent:
+            raise RuntimeError(
+                "Hyperliquid API wallet is not authorized for the configured "
+                "main wallet"
+            )
+
     async def submit_market_order(self, intent: OrderIntent) -> dict[str, Any]:
         """Submit an intent using its deterministic Hyperliquid cloid."""
         ticker = await self.fetch_price_async(intent.symbol)
@@ -208,6 +238,11 @@ class HyperLiquidExchange(IExchange):
             intent.symbol,
             intent.amount,
             reference_price=market_price,
+            max_notional=(
+                None
+                if intent.reduce_only
+                else self.trading_config.max_order_notional_usdc
+            ),
         )
         if not math.isclose(prepared.amount, intent.amount, rel_tol=1e-12):
             raise ValueError(
@@ -240,8 +275,9 @@ class HyperLiquidExchange(IExchange):
         amount: float,
         *,
         reference_price: float | None = None,
+        max_notional: float | None = None,
     ) -> PreparedMarketOrder:
-        """Normalize amount/price and enforce exchange market limits."""
+        """Normalize amount/price and enforce exchange and entry limits."""
 
         await self.rest.call(
             "load_markets",
@@ -270,6 +306,35 @@ class HyperLiquidExchange(IExchange):
         ):
             raise ValueError(f"order for {symbol} rounds to zero")
 
+        if max_notional is not None:
+            max_notional = float(max_notional)
+            if not math.isfinite(max_notional) or max_notional <= 0:
+                raise ValueError(f"invalid maximum order notional for {symbol}")
+            if normalized_amount * normalized_price > max_notional:
+                capped_amount = float(
+                    self.exchange_private.amount_to_precision(
+                        symbol,
+                        max_notional / normalized_price,
+                    )
+                )
+                if capped_amount * normalized_price > max_notional:
+                    amount_increment = float(
+                        ((market.get("precision", {}) or {}).get("amount") or 0)
+                    )
+                    if (
+                        self.exchange_private.precisionMode != ccxt_async.TICK_SIZE
+                        or not math.isfinite(amount_increment)
+                        or amount_increment <= 0
+                    ):
+                        raise ValueError(f"cannot safely cap order amount for {symbol}")
+                    capped_amount = float(
+                        self.exchange_private.amount_to_precision(
+                            symbol,
+                            capped_amount - amount_increment,
+                        )
+                    )
+                normalized_amount = min(normalized_amount, capped_amount)
+
         limits = market.get("limits", {})
         minimum_amount = float((limits.get("amount", {}) or {}).get("min") or 0)
         # Hyperliquid's documented perp minimum is $10. Prefer stricter live
@@ -279,6 +344,11 @@ class HyperLiquidExchange(IExchange):
             float((limits.get("cost", {}) or {}).get("min") or 0),
         )
         notional = normalized_amount * normalized_price
+        if max_notional is not None and notional > max_notional:
+            raise ValueError(
+                f"order notional {notional:.8f} exceeds configured maximum "
+                f"{max_notional:.8f}"
+            )
         if minimum_amount and normalized_amount < minimum_amount:
             raise ValueError(
                 f"order amount {normalized_amount} is below {symbol} minimum "

@@ -113,6 +113,41 @@ def test_production_app_has_no_hard_coded_symbols_or_raw_setting_bypass() -> Non
     assert len(raw_settings_reads) == 1
 
 
+def test_production_app_does_not_send_periodic_discord_heartbeats() -> None:
+    app_path = (
+        REPOSITORY_ROOT / "src" / "crypto_spot_collector" / "apps" / "buy_perp.py"
+    )
+    source = app_path.read_text(encoding="utf-8")
+    tree = ast.parse(source, filename=str(app_path))
+    function_names = {
+        node.name for node in ast.walk(tree) if isinstance(node, ast.AsyncFunctionDef)
+    }
+
+    assert "Hyperliquid bot heartbeat:" not in source
+    assert "heartbeat_loop" not in function_names
+    assert "health_pulse_loop" in function_names
+
+
+def test_production_entries_pass_the_hard_notional_cap_to_normalization() -> None:
+    app_path = (
+        REPOSITORY_ROOT / "src" / "crypto_spot_collector" / "apps" / "buy_perp.py"
+    )
+    source = app_path.read_text(encoding="utf-8")
+
+    assert source.count("max_notional=trading_config.max_order_notional_usdc") == 2
+
+
+def test_production_app_validates_api_wallet_before_order_recovery() -> None:
+    app_path = (
+        REPOSITORY_ROOT / "src" / "crypto_spot_collector" / "apps" / "buy_perp.py"
+    )
+    source = app_path.read_text(encoding="utf-8")
+
+    authorization = source.index("validate_api_wallet_authorization()")
+    recovery = source.index("order_executor.recover_unsettled()")
+    assert authorization < recovery
+
+
 def test_exchange_rejects_unvalidated_mainnet_before_client_creation() -> None:
     invalid_mainnet = _valid_config(network=Network.MAINNET)
     with pytest.raises(ValueError, match="mainnet"):

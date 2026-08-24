@@ -242,6 +242,7 @@ class FakeRest:
 class FakeCcxtExchange:
     def __init__(self) -> None:
         self.leverage_calls: list[tuple[int, str, dict[str, Any]]] = []
+        self.precisionMode = 4
 
     async def load_markets(self) -> dict[str, Any]:
         return {}
@@ -252,7 +253,8 @@ class FakeCcxtExchange:
                 "amount": {"min": 0.001},
                 "cost": {"min": 10},
                 "leverage": {"max": 25},
-            }
+            },
+            "precision": {"amount": 0.001},
         }
 
     def amount_to_precision(self, _symbol: str, amount: float) -> str:
@@ -271,12 +273,23 @@ class FakeCcxtExchange:
         return {"status": "ok", "response": {"type": "default"}}
 
 
+class FakePublicExchange:
+    def __init__(self, role: dict[str, Any]) -> None:
+        self.role = role
+
+    async def public_post_info(self, _request: dict[str, str]) -> dict[str, Any]:
+        return self.role
+
+
 def bare_exchange() -> HyperLiquidExchange:
     exchange = object.__new__(HyperLiquidExchange)
     exchange.exchange_private = FakeCcxtExchange()
     exchange.rest = FakeRest()
     exchange.leverage = 20
-    exchange.trading_config = SimpleNamespace(margin_mode="cross")
+    exchange.trading_config = SimpleNamespace(
+        margin_mode="cross",
+        max_order_notional_usdc=10.5,
+    )
     return exchange
 
 
@@ -296,6 +309,73 @@ async def test_order_is_rounded_to_market_precision_and_minimum() -> None:
 
     with pytest.raises(ValueError, match="invalid order amount"):
         await exchange.prepare_market_order(SYMBOL, math.nan, reference_price=2500)
+
+
+@pytest.mark.asyncio
+async def test_entry_amount_is_rounded_down_below_notional_cap() -> None:
+    exchange = bare_exchange()
+
+    prepared = await exchange.prepare_market_order(
+        SYMBOL,
+        0.0106,
+        reference_price=1000,
+        max_notional=10.5,
+    )
+
+    assert prepared.amount == 0.01
+    assert prepared.amount * prepared.reference_price == 10.0
+
+
+@pytest.mark.asyncio
+async def test_notional_cap_fails_when_safe_amount_is_below_exchange_minimum() -> None:
+    exchange = bare_exchange()
+
+    with pytest.raises(ValueError, match="below .* minimum"):
+        await exchange.prepare_market_order(
+            SYMBOL,
+            0.0106,
+            reference_price=1000,
+            max_notional=9.9,
+        )
+
+
+@pytest.mark.asyncio
+async def test_api_wallet_must_be_authorized_for_main_wallet() -> None:
+    exchange = bare_exchange()
+    exchange.main_wallet_address = "0xmain"
+    exchange.api_wallet_address = "0xagent"
+    exchange.exchange_public = FakePublicExchange(
+        {"role": "agent", "data": {"user": "0xMAIN"}}
+    )
+
+    await exchange.validate_api_wallet_authorization()
+
+    exchange.exchange_public = FakePublicExchange({"role": "missing"})
+    with pytest.raises(RuntimeError, match="not authorized"):
+        await exchange.validate_api_wallet_authorization()
+
+
+@pytest.mark.asyncio
+async def test_main_wallet_signer_is_valid_for_same_main_account() -> None:
+    exchange = bare_exchange()
+    exchange.main_wallet_address = "0xmain"
+    exchange.api_wallet_address = "0xMAIN"
+    exchange.exchange_public = FakePublicExchange({"role": "user"})
+
+    await exchange.validate_api_wallet_authorization()
+
+
+@pytest.mark.asyncio
+async def test_api_wallet_authorized_for_another_main_wallet_is_rejected() -> None:
+    exchange = bare_exchange()
+    exchange.main_wallet_address = "0xmain"
+    exchange.api_wallet_address = "0xagent"
+    exchange.exchange_public = FakePublicExchange(
+        {"role": "agent", "data": {"user": "0xother"}}
+    )
+
+    with pytest.raises(RuntimeError, match="not authorized"):
+        await exchange.validate_api_wallet_authorization()
 
 
 @pytest.mark.asyncio

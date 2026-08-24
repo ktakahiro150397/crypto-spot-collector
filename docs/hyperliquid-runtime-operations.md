@@ -118,6 +118,10 @@ Deployment, environment-separated secrets, persistent state, healthcheck,
 backup/restore and rollback procedures are documented in
 `docs/hyperliquid-deployment-runbook.md`.
 
+The approved ETH + BTC parallel-position configuration and its separate
+activation gate are documented in
+`docs/hyperliquid-mainnet-phase1-rollout.md`.
+
 The production-path destructive testnet procedure and its latest evidence are
 documented in `docs/hyperliquid-testnet-acceptance-2026-08-13.md`.
 
