@@ -104,6 +104,9 @@ def test_deploy_script_requires_disabled_preflight_and_refuses_old_bot() -> None
     assert "--profile portfolio-testnet" in script
     assert 'HYPERLIQUID_MAINNET_CONFIRMATION=""' in script
     assert "--force-recreate" in script
+    assert "state_admin" in script
+    assert script.index("build app_portfolio_testnet") < script.index("state_admin")
+    assert "if docker compose --profile portfolio-testnet ps -q" not in script
 
 
 def test_activation_requires_exact_phrase_and_enabled_preflight() -> None:

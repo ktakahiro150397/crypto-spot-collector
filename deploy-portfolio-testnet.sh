@@ -18,14 +18,14 @@ docker compose --profile portfolio-testnet config --quiet
 mkdir -p backups
 
 timestamp="$(date -u +%Y%m%dT%H%M%SZ)"
-if docker compose --profile portfolio-testnet ps -q app_portfolio_testnet | grep -q .; then
-  docker compose --profile portfolio-testnet run --rm --no-deps --entrypoint uv \
-    app_portfolio_testnet run python -m crypto_spot_collector.scripts.state_admin \
-    backup --state-dir /var/lib/crypto-spot-collector \
-    --output "/backups/order_intents-${timestamp}.sqlite"
-fi
-
 docker compose --profile portfolio-testnet build app_portfolio_testnet
+docker compose --profile portfolio-testnet run --rm --no-deps --entrypoint sh \
+  app_portfolio_testnet -c \
+  'if [ -f /var/lib/crypto-spot-collector/order_intents.sqlite ]; then
+    uv run python -m crypto_spot_collector.scripts.state_admin \
+      backup --state-dir /var/lib/crypto-spot-collector \
+      --output "/backups/order_intents-'"$timestamp"'.sqlite"
+  fi'
 docker compose --profile portfolio-testnet up -d --force-recreate --no-deps \
   app_portfolio_testnet
 
