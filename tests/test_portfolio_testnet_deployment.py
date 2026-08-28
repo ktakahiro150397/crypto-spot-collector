@@ -6,6 +6,9 @@ from typing import cast
 
 import pytest
 
+from crypto_spot_collector.scripts.portfolio_testnet_account_preflight import (
+    audit_flat_account,
+)
 from crypto_spot_collector.scripts.portfolio_testnet_preflight import (
     main as preflight_main,
 )
@@ -21,6 +24,34 @@ SAMPLE = ROOT / "deploy" / "settings" / "hyperliquid.portfolio-testnet.json.samp
 
 def document() -> dict[str, object]:
     return cast(dict[str, object], json.loads(SAMPLE.read_text(encoding="utf-8")))
+
+
+class FakeAccount:
+    def __init__(
+        self,
+        *,
+        positions: list[dict[str, object]] | None = None,
+        orders: list[dict[str, object]] | None = None,
+        free_collateral: float = 100,
+    ) -> None:
+        self.positions = positions or []
+        self.orders = orders or []
+        self.free_collateral = free_collateral
+        self.authorization_checked = False
+
+    async def validate_api_wallet_authorization(self) -> None:
+        self.authorization_checked = True
+
+    async def fetch_positions(self) -> list[dict[str, object]]:
+        return self.positions
+
+    async def fetch_open_orders(
+        self, symbol: str | None = None
+    ) -> list[dict[str, object]]:
+        return self.orders
+
+    async def fetch_free_collateral(self) -> float:
+        return self.free_collateral
 
 
 def test_portfolio_testnet_sample_is_valid_but_execution_disabled() -> None:
@@ -47,6 +78,34 @@ def test_initial_preflight_rejects_enabled_or_non_testnet_settings() -> None:
     mainnet["settings"]["network"] = "mainnet"  # type: ignore[index]
     with pytest.raises(ValueError, match="testnet-only"):
         validate_portfolio_testnet_settings(mainnet)
+
+
+@pytest.mark.asyncio
+async def test_live_account_preflight_requires_flat_account_and_zero_orders() -> None:
+    config = validate_portfolio_testnet_settings(document())
+    flat = FakeAccount()
+    summary = await audit_flat_account(flat, config)  # type: ignore[arg-type]
+    assert flat.authorization_checked is True
+    assert summary["active_position_count"] == 0
+    assert summary["open_order_count"] == 0
+    assert summary["minimum_free_collateral_ready"] is True
+
+    positioned = FakeAccount(
+        positions=[
+            {
+                "symbol": "BTC/USDC:USDC",
+                "contracts": 0.001,
+                "side": "long",
+                "markPrice": 100_000,
+            }
+        ]
+    )
+    with pytest.raises(DeploymentError, match="flat account"):
+        await audit_flat_account(positioned, config)  # type: ignore[arg-type]
+
+    ordered = FakeAccount(orders=[{"id": "open"}])
+    with pytest.raises(DeploymentError, match="zero open orders"):
+        await audit_flat_account(ordered, config)  # type: ignore[arg-type]
 
 
 def test_cli_preflight_validates_secret_affinity_without_printing_secrets(
@@ -115,6 +174,7 @@ def test_deploy_script_requires_disabled_preflight_and_refuses_old_bot() -> None
     assert script.index("build app_portfolio_testnet") < script.index(
         "portfolio_testnet_preflight"
     )
+    assert "portfolio_testnet_account_preflight" in script
 
 
 def test_activation_requires_exact_phrase_and_enabled_preflight() -> None:

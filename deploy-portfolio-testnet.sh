@@ -21,6 +21,11 @@ docker compose --profile portfolio-testnet run --rm --no-deps --entrypoint uv \
   -m crypto_spot_collector.scripts.portfolio_testnet_preflight \
   --settings /run/secrets/hyperliquid_settings.json \
   --secrets /run/secrets/hyperliquid_credentials.json
+docker compose --profile portfolio-testnet run --rm --no-deps --entrypoint uv \
+  app_portfolio_testnet run python \
+  -m crypto_spot_collector.scripts.portfolio_testnet_account_preflight \
+  --settings /run/secrets/hyperliquid_settings.json \
+  --secrets /run/secrets/hyperliquid_credentials.json
 docker compose --profile portfolio-testnet run --rm --no-deps --entrypoint sh \
   app_portfolio_testnet -c \
   'if [ -f /var/lib/crypto-spot-collector/order_intents.sqlite ]; then

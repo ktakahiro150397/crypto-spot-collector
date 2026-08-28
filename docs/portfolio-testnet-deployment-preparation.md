@@ -57,16 +57,17 @@ initial settings file with entries already enabled.
 ## Disabled-entry deployment
 
 Before running this externally, confirm that the old `app_perp` service is stopped and
-that any existing testnet positions remain protected or are flat. The script refuses
-to proceed while the old service is running.
+that the testnet account is flat with no open orders. The script refuses to proceed
+while the old service is running or the account is not clean.
 
 ```sh
 ./deploy-portfolio-testnet.sh
 ```
 
 The script validates the Compose graph, builds the image, runs the offline preflight
-inside that image (the host does not need `uv`), backs up any existing SQLite state
-even on the first portfolio deployment,
+inside that image (the host does not need `uv`), performs a read-only live gate that
+requires API-wallet authorization, zero positions, and zero open orders, backs up any
+existing SQLite state even on the first portfolio deployment,
 force-recreates the service so secret/config source changes cannot reuse an old
 container, and waits for health. It does not accept an enabled settings file.
 
