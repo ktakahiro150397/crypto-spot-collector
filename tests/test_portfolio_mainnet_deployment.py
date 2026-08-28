@@ -63,6 +63,7 @@ def test_compose_declares_dedicated_mainnet_observer() -> None:
     compose = (ROOT / "docker-compose.yml").read_text(encoding="utf-8")
     assert 'profiles: ["portfolio-mainnet-disabled"]' in compose
     assert "app_portfolio_mainnet_disabled:" in compose
+    assert "image: crypto-spot-collector:portfolio-mainnet-disabled" in compose
     assert "HYPERLIQUID_DEPLOYMENT_NETWORK=mainnet" in compose
     assert "crypto_spot_collector.apps.buy_portfolio" in compose
 
@@ -77,6 +78,7 @@ def test_deploy_script_gates_mainnet_before_start_and_rechecks_after() -> None:
     assert "--read-only" in script
     assert "--network none" in script
     assert "/app/.venv/bin/python" in script
+    assert "docker image inspect" in script
     assert "ENTRY_KILL_SWITCH" in script
     assert "state_admin" in script
     assert "--force-recreate" in script

@@ -36,7 +36,7 @@ mkdir -p backups
 
 timestamp="$(date -u +%Y%m%dT%H%M%SZ)"
 docker compose --profile portfolio-mainnet-disabled build app_portfolio_mainnet_disabled
-image_id="$(docker compose --profile portfolio-mainnet-disabled images -q app_portfolio_mainnet_disabled | head -n 1)"
+image_id="$(docker image inspect --format '{{.Id}}' crypto-spot-collector:portfolio-mainnet-disabled 2>/dev/null || true)"
 if [ -z "$image_id" ]; then
   echo "Built portfolio image could not be resolved." >&2
   exit 1

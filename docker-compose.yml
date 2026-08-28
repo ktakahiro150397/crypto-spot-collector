@@ -101,6 +101,7 @@ services:
 
   app_portfolio_mainnet_disabled:
     profiles: ["portfolio-mainnet-disabled"]
+    image: crypto-spot-collector:portfolio-mainnet-disabled
     build:
       context: .
       dockerfile: Dockerfile
