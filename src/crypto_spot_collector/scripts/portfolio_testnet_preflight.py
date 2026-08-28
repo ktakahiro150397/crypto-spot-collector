@@ -22,6 +22,9 @@ def validate_portfolio_testnet_settings(
     settings = document.get("settings")
     if not isinstance(settings, Mapping):
         raise ValueError("settings object is missing")
+    network = settings.get("network")
+    if network is not None and str(network).lower() != Network.TESTNET.value:
+        raise ValueError("portfolio deployment preflight is testnet-only")
     config = TradingConfig.from_mapping(settings)
     if config.network is not Network.TESTNET:
         raise ValueError("portfolio deployment preflight is testnet-only")

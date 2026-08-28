@@ -1,4 +1,4 @@
-"""Testnet-only execution boundary for the daily portfolio strategy."""
+"""Execution boundary for the daily portfolio strategy."""
 
 from __future__ import annotations
 
@@ -219,8 +219,6 @@ class PortfolioExecutionCoordinator:
         kill_switch_path: Path | str,
     ) -> None:
         trading_config.validate()
-        if trading_config.network is not Network.TESTNET:
-            raise ValueError("portfolio execution coordinator is testnet-only")
         self.adapter = adapter
         self.executor = executor
         self.protection_reconciler = protection_reconciler
@@ -235,6 +233,11 @@ class PortfolioExecutionCoordinator:
         expected_plan: RebalancePlan,
     ) -> PortfolioExecutionReceipt:
         """Execute only the first action bound to the current position snapshot."""
+
+        if self.trading_config.network is Network.MAINNET:
+            raise PortfolioExecutionError(
+                "mainnet portfolio runtime is observation-only"
+            )
 
         before_positions = list(await self.adapter.fetch_positions())
         before_notionals = position_notionals(

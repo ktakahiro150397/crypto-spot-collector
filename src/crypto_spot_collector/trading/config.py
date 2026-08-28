@@ -143,8 +143,11 @@ class TradingConfig:
                 SELECTED_PORTFOLIO_SYMBOLS,
             )
 
-            if self.network is not Network.TESTNET:
-                errors.append("portfolio trend ensemble is testnet-only")
+            if self.network is Network.MAINNET and self.entries_enabled:
+                errors.append(
+                    "portfolio trend ensemble on mainnet requires "
+                    "entries_enabled=false"
+                )
             if self.timeframe != "1d":
                 errors.append("portfolio trend ensemble requires timeframe=1d")
             if self.leverage != 1 or self.max_leverage != 1:

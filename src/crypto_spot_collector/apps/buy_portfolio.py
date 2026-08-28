@@ -1,4 +1,4 @@
-"""Dedicated testnet runtime for the frozen daily portfolio strategy."""
+"""Dedicated runtime for the frozen daily portfolio strategy."""
 
 from __future__ import annotations
 
@@ -28,6 +28,7 @@ from crypto_spot_collector.trading.order_state import (
 )
 from crypto_spot_collector.trading.portfolio_execution import (
     PortfolioExecutionCoordinator,
+    PortfolioExecutionError,
     calculate_live_portfolio_decision,
     position_notionals,
     trend_config_from_trading_config,
@@ -77,6 +78,28 @@ class PortfolioApplication:
 
     async def initialize(self) -> None:
         await self.exchange.validate_api_wallet_authorization()
+        if not self.config.entries_enabled:
+            await self._require_flat_observer_account()
+            unsettled = self.order_executor.store.list_unsettled()
+            if unsettled:
+                raise RuntimeError(
+                    "observation-only startup is inhibited by unsettled order "
+                    "intent(s): "
+                    + ", ".join(order.cloid for order in unsettled)
+                )
+            latest = self.decision_store.latest()
+            if latest is not None and latest.status not in {
+                DecisionStatus.COMPLETE,
+                DecisionStatus.BLOCKED,
+            }:
+                raise RuntimeError(
+                    "an unfinished portfolio decision exists while execution is disabled"
+                )
+            logger.info(
+                "Portfolio observer initialized: network={}, execution_enabled=false",
+                self.config.network.value,
+            )
+            return
         recovered = await self.order_executor.recover_unsettled()
         unresolved = [
             order
@@ -97,11 +120,19 @@ class PortfolioApplication:
             DecisionStatus.COMPLETE,
             DecisionStatus.BLOCKED,
         }:
-            if not self.config.entries_enabled:
-                raise RuntimeError(
-                    "an unfinished portfolio decision exists while execution is disabled"
-                )
             await self.execute_to_completion(latest.decision)
+
+    async def _require_flat_observer_account(self) -> None:
+        positions = list(await self.exchange.fetch_positions())
+        notionals = position_notionals(positions, self.strategy_config.symbols)
+        if any(value != 0 for value in notionals.values()):
+            raise PortfolioExecutionError(
+                "observation-only portfolio runtime requires a flat account"
+            )
+        if list(await self.exchange.fetch_open_orders()):
+            raise PortfolioExecutionError(
+                "observation-only portfolio runtime requires zero open orders"
+            )
 
     async def run_cycle(self, *, observed_at_ms: int | None = None) -> None:
         observed = observed_at_ms or int(datetime.now(timezone.utc).timestamp() * 1_000)
@@ -123,6 +154,14 @@ class PortfolioApplication:
             self.config.entries_enabled,
         )
         if not self.config.entries_enabled:
+            if any(value != 0 for value in notionals.values()):
+                raise PortfolioExecutionError(
+                    "observation-only portfolio runtime requires a flat account"
+                )
+            if list(await self.exchange.fetch_open_orders()):
+                raise PortfolioExecutionError(
+                    "observation-only portfolio runtime requires zero open orders"
+                )
             return
         stored, _ = self.decision_store.prepare(decision)
         if stored.status is DecisionStatus.BLOCKED:
@@ -188,7 +227,10 @@ def build_application() -> PortfolioApplication:
     settings_file = required_runtime_path("HYPERLIQUID_SETTINGS_FILE")
     state_directory = required_runtime_path("HYPERLIQUID_STATE_DIR")
     secrets = load_config(secret_file, settings_file)
-    config = TradingConfig.from_mapping(secrets["settings"])
+    config = TradingConfig.from_mapping(
+        secrets["settings"],
+        mainnet_confirmation=os.getenv("HYPERLIQUID_MAINNET_CONFIRMATION", ""),
+    )
     if config.signal_mode is not SignalMode.PORTFOLIO_TREND_ENSEMBLE:
         raise ValueError("buy_portfolio requires portfolio_trend_ensemble settings")
     deployment_secrets = validate_deployment_secrets(

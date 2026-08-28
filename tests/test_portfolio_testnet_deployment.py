@@ -152,7 +152,7 @@ def test_compose_uses_dedicated_profile_and_shared_wallet_lease_volume() -> None
     compose = (ROOT / "docker-compose.yml").read_text(encoding="utf-8")
     assert 'profiles: ["portfolio-testnet"]' in compose
     assert "crypto_spot_collector.apps.buy_portfolio" in compose
-    assert compose.count("hyperliquid-perp-state:/var/lib/crypto-spot-collector") == 2
+    assert compose.count("hyperliquid-perp-state:/var/lib/crypto-spot-collector") == 3
     assert "HYPERLIQUID_DEPLOYMENT_NETWORK=testnet" in compose
 
 

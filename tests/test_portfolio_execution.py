@@ -12,7 +12,12 @@ import pytest
 
 import crypto_spot_collector.apps.buy_portfolio as portfolio_app_module
 from crypto_spot_collector.apps.buy_portfolio import PortfolioApplication
-from crypto_spot_collector.trading.config import Network, SignalMode, TradingConfig
+from crypto_spot_collector.trading.config import (
+    MAINNET_CONFIRMATION,
+    Network,
+    SignalMode,
+    TradingConfig,
+)
 from crypto_spot_collector.trading.order_state import OrderIntent, OrderStatus
 from crypto_spot_collector.trading.portfolio_execution import (
     PortfolioExecutionCoordinator,
@@ -109,6 +114,10 @@ class FakeAdapter:
         self.orders: list[dict[str, Any]] = []
         self.free_collateral = 1_000.0
         self.ohlcv: dict[str, list[list[float]]] = {}
+        self.authorization_checks = 0
+
+    async def validate_api_wallet_authorization(self) -> None:
+        self.authorization_checks += 1
 
     async def fetch_positions(self) -> list[dict[str, Any]]:
         return [dict(item) for item in self.positions]
@@ -234,9 +243,21 @@ def coordinator(
     return result, store, executor, protection
 
 
-def test_portfolio_config_is_testnet_only_and_frozen() -> None:
-    with pytest.raises(ValueError, match="testnet-only"):
-        trading_config(network=Network.MAINNET, allow_mainnet=True)
+def test_portfolio_config_allows_only_disabled_mainnet_observer_and_is_frozen() -> None:
+    mainnet = trading_config(
+        network=Network.MAINNET,
+        allow_mainnet=True,
+        mainnet_confirmation=MAINNET_CONFIRMATION,
+        entries_enabled=False,
+    )
+    assert mainnet.network is Network.MAINNET
+    with pytest.raises(ValueError, match="entries_enabled=false"):
+        trading_config(
+            network=Network.MAINNET,
+            allow_mainnet=True,
+            mainnet_confirmation=MAINNET_CONFIRMATION,
+            entries_enabled=True,
+        )
     with pytest.raises(ValueError, match="frozen set"):
         trading_config(symbols=tuple(reversed(SELECTED_PORTFOLIO_SYMBOLS)))
     with pytest.raises(ValueError, match="timeframe=1d"):
@@ -344,6 +365,35 @@ async def test_increase_is_blocked_by_disabled_entries_kill_switch_or_order(
         await ordered.execute_next(
             target, plan_rebalance(target, {}, ordered.strategy_config)
         )
+
+
+@pytest.mark.asyncio
+async def test_mainnet_coordinator_blocks_every_execution_path(tmp_path: Path) -> None:
+    adapter = FakeAdapter([position()])
+    mainnet = trading_config(
+        network=Network.MAINNET,
+        allow_mainnet=True,
+        mainnet_confirmation=MAINNET_CONFIRMATION,
+        entries_enabled=False,
+    )
+    runtime, store, executor, protection = coordinator(
+        tmp_path, adapter, config=mainnet
+    )
+    target = decision(0)
+    store.prepare(target)
+
+    with pytest.raises(PortfolioExecutionError, match="observation-only"):
+        await runtime.execute_next(
+            target,
+            plan_rebalance(
+                target,
+                position_notionals(adapter.positions, SELECTED_PORTFOLIO_SYMBOLS),
+                runtime.strategy_config,
+            ),
+        )
+
+    assert executor.intents == []
+    assert protection.calls == []
 
 
 @pytest.mark.asyncio
@@ -455,6 +505,40 @@ async def test_disabled_application_cycle_is_read_only_for_decision_and_orders(
 
     assert store.latest() is None
     assert executor.intents == []
+
+
+@pytest.mark.asyncio
+async def test_disabled_application_initialization_is_observation_only(
+    tmp_path: Path,
+) -> None:
+    adapter = FakeAdapter()
+    decision_store = SQLitePortfolioDecisionStore(tmp_path / "observer.sqlite3")
+
+    class NoRecoveryExecutor:
+        def __init__(self) -> None:
+            self.store = SimpleNamespace(list_unsettled=lambda: [])
+
+        async def recover_unsettled(self) -> None:
+            raise AssertionError("disabled observer must not recover live orders")
+
+    class NoProtection:
+        async def reconcile_all(self, symbols: object) -> None:
+            raise AssertionError("disabled observer must not reconcile protection")
+
+    application = PortfolioApplication(
+        config=trading_config(entries_enabled=False),
+        exchange=adapter,  # type: ignore[arg-type]
+        runtime_state=SimpleNamespace(),  # type: ignore[arg-type]
+        order_executor=NoRecoveryExecutor(),  # type: ignore[arg-type]
+        decision_store=decision_store,
+        coordinator=SimpleNamespace(protection_reconciler=NoProtection()),  # type: ignore[arg-type]
+    )
+
+    await application.initialize()
+
+    assert adapter.authorization_checks == 1
+    assert adapter.positions == []
+    assert adapter.orders == []
 
 
 @pytest.mark.asyncio

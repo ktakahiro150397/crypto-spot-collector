@@ -45,12 +45,12 @@ async def audit_flat_account(
     )
     if any(value != 0 for value in notionals.values()):
         raise DeploymentError(
-            "portfolio testnet deployment requires a flat account before startup"
+            "portfolio deployment requires a flat account before startup"
         )
     open_orders = list(await exchange.fetch_open_orders())
     if open_orders:
         raise DeploymentError(
-            "portfolio testnet deployment requires zero open orders before startup"
+            "portfolio deployment requires zero open orders before startup"
         )
     free_collateral = float(await exchange.fetch_free_collateral())
     collateral_ready = (
