@@ -263,6 +263,35 @@ def test_rebalance_is_complete_inside_tolerance() -> None:
     assert plan.requires_position_refresh is False
 
 
+def test_tolerance_never_hides_small_opposite_or_unwanted_position() -> None:
+    reverse = manual_decision({SYMBOLS[0]: -30, SYMBOLS[1]: 25, SYMBOLS[2]: 20})
+    flatten = manual_decision({SYMBOLS[0]: 0, SYMBOLS[1]: 25, SYMBOLS[2]: 20})
+    settings = config(rebalance_tolerance_usdc=10)
+
+    reverse_plan = plan_rebalance(reverse, {SYMBOLS[0]: 5}, settings)
+    flatten_plan = plan_rebalance(flatten, {SYMBOLS[0]: 5}, settings)
+
+    assert reverse_plan.phase is RebalancePhase.REDUCE
+    assert flatten_plan.phase is RebalancePhase.REDUCE
+    assert reverse_plan.actions[0].notional_usdc == 5
+    assert flatten_plan.actions[0].notional_usdc == 5
+    assert reverse_plan.actions[0].reduce_only is True
+    assert flatten_plan.actions[0].reduce_only is True
+
+
+def test_tolerance_never_permits_live_gross_above_hard_limit() -> None:
+    target = manual_decision({SYMBOLS[0]: 30, SYMBOLS[1]: 25, SYMBOLS[2]: 20})
+    plan = plan_rebalance(
+        target,
+        {SYMBOLS[0]: 35, SYMBOLS[1]: 30, SYMBOLS[2]: 25},
+        config(rebalance_tolerance_usdc=10),
+    )
+
+    assert plan.phase is RebalancePhase.REDUCE
+    assert [action.notional_usdc for action in plan.actions] == [5, 5, 5]
+    assert all(action.reduce_only for action in plan.actions)
+
+
 @pytest.mark.parametrize(
     "positions",
     [

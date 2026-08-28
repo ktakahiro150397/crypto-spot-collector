@@ -144,6 +144,10 @@ trading_config = TradingConfig.from_mapping(
     secrets["settings"],
     mainnet_confirmation=os.getenv("HYPERLIQUID_MAINNET_CONFIRMATION", ""),
 )
+if trading_config.signal_mode is SignalMode.PORTFOLIO_TREND_ENSEMBLE:
+    raise ValueError(
+        "portfolio_trend_ensemble must use the dedicated buy_portfolio application"
+    )
 perp_symbols = list(trading_config.symbols)
 deployment_secrets = validate_deployment_secrets(
     secrets,

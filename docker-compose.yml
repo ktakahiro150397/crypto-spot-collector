@@ -58,6 +58,47 @@ services:
       retries: 3
       start_period: 60s
 
+  app_portfolio_testnet:
+    profiles: ["portfolio-testnet"]
+    build:
+      context: .
+      dockerfile: Dockerfile
+    volumes:
+      - ./logs:/app/crypto_spot_collector/apps/logs
+      - ./backups:/backups
+      - hyperliquid-perp-state:/var/lib/crypto-spot-collector
+    secrets:
+      - source: hyperliquid_perp_credentials
+        target: hyperliquid_credentials.json
+      - source: hyperliquid_perp_settings
+        target: hyperliquid_settings.json
+    command: uv run python -m crypto_spot_collector.apps.buy_portfolio
+    init: true
+    restart: unless-stopped
+    stop_grace_period: 45s
+    networks:
+      - crypto-network
+    environment:
+      - HYPERLIQUID_SECRETS_FILE=/run/secrets/hyperliquid_credentials.json
+      - HYPERLIQUID_SETTINGS_FILE=/run/secrets/hyperliquid_settings.json
+      - HYPERLIQUID_STATE_DIR=/var/lib/crypto-spot-collector
+      - HYPERLIQUID_DEPLOYMENT_NETWORK=testnet
+      - HYPERLIQUID_MAINNET_CONFIRMATION=
+    healthcheck:
+      test:
+        - CMD
+        - uv
+        - run
+        - python
+        - -m
+        - crypto_spot_collector.scripts.healthcheck
+        - --state-dir
+        - /var/lib/crypto-spot-collector
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
   bot:
     build:
       context: .

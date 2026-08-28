@@ -17,6 +17,7 @@ class Network(str, Enum):
 class SignalMode(str, Enum):
     SAR_ONLY = "sar_only"
     PRICE_CHANGE_ONLY = "price_change_only"
+    PORTFOLIO_TREND_ENSEMBLE = "portfolio_trend_ensemble"
 
 
 MAINNET_CONFIRMATION = "I_UNDERSTAND_THIS_WILL_TRADE_ON_HYPERLIQUID_MAINNET"
@@ -56,6 +57,8 @@ class TradingConfig:
     network: Network = Network.TESTNET
     allow_mainnet: bool = False
     mainnet_confirmation: str = ""
+    portfolio_rebalance_tolerance_usdc: float = 0.25
+    portfolio_max_decision_delay_seconds: int = 21_600
 
     @property
     def testnet(self) -> bool:
@@ -117,7 +120,11 @@ class TradingConfig:
             errors.append("min_free_collateral_usdc must not be negative")
         if not self.entry_kill_switch_file.strip():
             errors.append("entry_kill_switch_file must not be empty")
-        if self.signal_mode not in {SignalMode.SAR_ONLY, SignalMode.PRICE_CHANGE_ONLY}:
+        if self.signal_mode not in {
+            SignalMode.SAR_ONLY,
+            SignalMode.PRICE_CHANGE_ONLY,
+            SignalMode.PORTFOLIO_TREND_ENSEMBLE,
+        }:
             errors.append("unsupported signal mode")
         if self.margin_mode not in {"cross", "isolated"}:
             errors.append("margin_mode must be cross or isolated")
@@ -131,6 +138,38 @@ class TradingConfig:
                 errors.append("canary mode requires exactly one symbol")
             if self.max_positions != 1:
                 errors.append("canary mode requires max_positions=1")
+        if self.signal_mode is SignalMode.PORTFOLIO_TREND_ENSEMBLE:
+            from crypto_spot_collector.trading.portfolio_strategy import (
+                SELECTED_PORTFOLIO_SYMBOLS,
+            )
+
+            if self.network is not Network.TESTNET:
+                errors.append("portfolio trend ensemble is testnet-only")
+            if self.timeframe != "1d":
+                errors.append("portfolio trend ensemble requires timeframe=1d")
+            if self.leverage != 1 or self.max_leverage != 1:
+                errors.append("portfolio trend ensemble requires 1x leverage")
+            if self.symbols != SELECTED_PORTFOLIO_SYMBOLS:
+                errors.append(
+                    "portfolio trend ensemble symbols must match the frozen set"
+                )
+            if self.canary_mode:
+                errors.append("portfolio trend ensemble cannot use canary mode")
+            if self.max_positions != len(SELECTED_PORTFOLIO_SYMBOLS):
+                errors.append("portfolio trend ensemble requires max_positions=6")
+            if self.max_total_notional_usdc > 75:
+                errors.append(
+                    "portfolio trend ensemble gross cap cannot exceed 75 USDC"
+                )
+            if self.max_symbol_notional_usdc < self.max_total_notional_usdc:
+                errors.append("portfolio symbol limit must cover the full gross cap")
+            if (
+                not math.isfinite(self.portfolio_rebalance_tolerance_usdc)
+                or self.portfolio_rebalance_tolerance_usdc < 0
+            ):
+                errors.append("portfolio rebalance tolerance must be non-negative")
+            if self.portfolio_max_decision_delay_seconds <= 0:
+                errors.append("portfolio decision delay must be positive")
         if errors:
             raise ValueError("invalid trading configuration: " + "; ".join(errors))
 
@@ -169,6 +208,7 @@ class TradingConfig:
         amount_usdc = float(perpetual.get("amountByUSDC", 10.0))
         leverage = int(perpetual.get("leverage", 1))
         risk = perpetual.get("risk", {})
+        portfolio = perpetual.get("portfolio", {})
         required_mainnet_risk_keys = {
             "max_order_notional_usdc",
             "max_symbol_notional_usdc",
@@ -235,6 +275,12 @@ class TradingConfig:
             network=network,
             allow_mainnet=bool(settings.get("allow_mainnet", False)),
             mainnet_confirmation=mainnet_confirmation,
+            portfolio_rebalance_tolerance_usdc=float(
+                portfolio.get("rebalance_tolerance_usdc", 0.25)
+            ),
+            portfolio_max_decision_delay_seconds=int(
+                portfolio.get("max_decision_delay_seconds", 21_600)
+            ),
         )
         config.validate()
         return config

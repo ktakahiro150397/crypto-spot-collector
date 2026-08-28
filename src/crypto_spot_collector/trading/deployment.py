@@ -152,6 +152,7 @@ class RuntimeState:
         )
         summary = {
             "network": config.network.value,
+            "signal_mode": config.signal_mode.value,
             "symbols": list(config.symbols),
             "symbol_count": len(config.symbols),
             "canary_mode": config.canary_mode,

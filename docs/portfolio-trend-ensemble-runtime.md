@@ -9,8 +9,11 @@ enters one symbol at a time and its execution coordinator only confirms full clo
 silently attaching a synchronized, partially rebalanced portfolio to that path would
 make sizing and restart behavior unsafe.
 
-This change performs no exchange calls, changes no deployment settings, and cannot
-start the stopped bot.
+The core is now connected to a dedicated testnet-only runtime in
+`trading/portfolio_execution.py` and `apps/buy_portfolio.py`. It remains rejected on
+mainnet and is not accepted by the legacy per-symbol application. Deployment and
+activation are separate explicit operations described in
+`portfolio-testnet-deployment-preparation.md`.
 
 ## Frozen strategy
 
@@ -71,18 +74,16 @@ On restart the caller must:
 operator action; it must not be used to bypass unresolved orders or unverified
 positions.
 
-## Gate before live wiring
+## Testnet wiring status
 
-The existing live path should remain unchanged until all of the following are added
-and tested:
+The dedicated testnet path now provides:
 
-- one atomic portfolio cycle that fetches all symbols at one observation time;
-- safe partial-reduction confirmation (the current close coordinator requires flat);
-- per-action amount conversion and risk reservations without exceeding the target
-  after precision rounding;
-- protection reconciliation after every increase and retained protection after a
-  partial reduction;
-- an explicit dry-run/testnet acceptance run and an operator-controlled feature flag.
+- one portfolio observation that fetches and strictly aligns all symbols;
+- safe partial-reduction quantity confirmation;
+- per-action amount normalization and order/collateral gates;
+- protection reconciliation after every increase or partial reduction;
+- an entry-disabled deployment and a separately confirmed testnet activation.
 
-Until those gates pass, this module is suitable for deterministic signal generation,
-dry-run target inspection, and execution-plan testing, not unattended mainnet orders.
+No external testnet acceptance has been run for this portfolio runtime. Minimum-order
+tracking error, fixed TP/SL behavior, restart recovery on actual fills, and final-flat
+cleanup remain mandatory testnet evidence. Mainnet remains unsupported.

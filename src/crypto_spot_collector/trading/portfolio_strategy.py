@@ -24,6 +24,14 @@ import pandas as pd
 
 DAY_MS = 86_400_000
 STRATEGY_NAME = "daily_trend_ensemble_v1"
+SELECTED_PORTFOLIO_SYMBOLS = (
+    "BTC/USDC:USDC",
+    "ETH/USDC:USDC",
+    "SOL/USDC:USDC",
+    "XRP/USDC:USDC",
+    "BNB/USDC:USDC",
+    "DOGE/USDC:USDC",
+)
 
 
 @dataclass(frozen=True)
@@ -182,6 +190,7 @@ _ALLOWED_STATUS_TRANSITIONS = {
         DecisionStatus.BLOCKED,
     },
     DecisionStatus.INCREASING: {
+        DecisionStatus.REDUCING,
         DecisionStatus.COMPLETE,
         DecisionStatus.BLOCKED,
     },
@@ -314,16 +323,21 @@ def plan_rebalance(
     _validate_decision_limits(decision, config)
 
     reductions: list[RebalanceAction] = []
+    current_gross = sum(abs(value) for value in current.values())
+    portfolio_is_over_limit = current_gross > config.gross_notional_usdc + 1e-9
     for symbol in config.symbols:
         live = current[symbol]
         target = targets[symbol]
-        if abs(live) <= config.rebalance_tolerance_usdc:
-            live = 0.0
         if live == 0:
             continue
         same_side = live * target > 0
         if not same_side:
             reduction = abs(live)
+        elif (
+            abs(live) > config.max_symbol_notional_usdc + 1e-9
+            or portfolio_is_over_limit
+        ) and abs(live) > abs(target) + 1e-9:
+            reduction = abs(live) - abs(target)
         elif abs(live) > abs(target) + config.rebalance_tolerance_usdc:
             reduction = abs(live) - abs(target)
         else:
