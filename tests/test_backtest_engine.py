@@ -296,6 +296,68 @@ def test_trailing_stop_activates_then_becomes_effective_next_candle() -> None:
     assert trade["exit_time"] == "2026-01-01T00:03:00+00:00"
 
 
+def test_profit_lock_floor_replaces_breakeven_after_activation() -> None:
+    series = _series(
+        [
+            {"open": 100, "high": 100, "low": 100, "close": 100},
+            {"open": 100, "high": 100.3, "low": 100, "close": 100.3},
+            {"open": 100.3, "high": 100.3, "low": 100.14, "close": 100.2},
+        ]
+    )
+    evaluator = _evaluator({"00:00": SarSignalDecision("long", True, False)})
+    result = PerpetualSarBacktester(
+        _config(
+            take_profit_roe=10.0,
+            stop_loss_roe=10.0,
+            trailing_activation_roe=0.25,
+            profit_lock_floor_roe=0.15,
+        ),
+        signal_evaluator=evaluator,
+    ).run(series)
+
+    trade = result.trades.iloc[0]
+    assert trade["exit_reason"] == "trailing_stop"
+    assert trade["exit_price"] == pytest.approx(100.15)
+    assert trade["net_pnl"] == pytest.approx(0.15)
+
+
+def test_short_profit_lock_floor_is_below_entry() -> None:
+    series = _series(
+        [
+            {"open": 100, "high": 100, "low": 100, "close": 100},
+            {"open": 100, "high": 100, "low": 99.7, "close": 99.7},
+            {"open": 99.7, "high": 99.86, "low": 99.7, "close": 99.8},
+        ]
+    )
+    evaluator = _evaluator(
+        {"00:00": SarSignalDecision("short", False, True)},
+        default_direction="short",
+    )
+    result = PerpetualSarBacktester(
+        _config(
+            take_profit_roe=10.0,
+            stop_loss_roe=10.0,
+            trailing_activation_roe=0.25,
+            profit_lock_floor_roe=0.15,
+        ),
+        signal_evaluator=evaluator,
+    ).run(series)
+
+    trade = result.trades.iloc[0]
+    assert trade["exit_reason"] == "trailing_stop"
+    assert trade["exit_price"] == pytest.approx(99.85)
+    assert trade["net_pnl"] == pytest.approx(0.15)
+
+
+@pytest.mark.parametrize("floor", [-0.1, 0.25, float("nan")])
+def test_profit_lock_floor_must_be_below_activation(floor: float) -> None:
+    with pytest.raises(BacktestConfigError, match="profit-lock floor"):
+        _config(
+            trailing_activation_roe=0.25,
+            profit_lock_floor_roe=floor,
+        ).validate("1m")
+
+
 def test_metrics_report_drawdown_and_profit_factor() -> None:
     evaluator = _evaluator({"00:00": SarSignalDecision("long", True, False)})
     result = PerpetualSarBacktester(_config(), signal_evaluator=evaluator).run(

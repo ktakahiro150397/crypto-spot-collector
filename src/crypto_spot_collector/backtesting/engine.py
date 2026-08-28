@@ -44,6 +44,7 @@ class BacktestConfig:
     take_profit_roe: float = 15.0
     stop_loss_roe: float = 3.0
     trailing_activation_roe: float = 7.0
+    profit_lock_floor_roe: float = 0.0
     trailing_interval_minutes: int = 3
     sar_consecutive_count: int = 4
     sar_close_consecutive_count: int = 2
@@ -73,6 +74,15 @@ class BacktestConfig:
         if self.trailing_activation_roe >= self.take_profit_roe:
             raise BacktestConfigError(
                 "trailing activation ROE must be lower than take-profit ROE"
+            )
+        if (
+            not math.isfinite(self.profit_lock_floor_roe)
+            or self.profit_lock_floor_roe < 0
+            or self.profit_lock_floor_roe >= self.trailing_activation_roe
+        ):
+            raise BacktestConfigError(
+                "profit-lock floor ROE must be finite, non-negative, and lower "
+                "than trailing activation ROE"
             )
         if self.trailing_interval_minutes <= 0:
             raise BacktestConfigError("trailing interval must be positive")
@@ -589,7 +599,27 @@ class PerpetualSarBacktester:
         )
         if not trailing.trailing_activated:
             if roe >= self.config.trailing_activation_roe:
-                self._trailing.activate_trailing("backtest", close_price)
+                activated = self._trailing.activate_trailing(
+                    "backtest",
+                    close_price,
+                )
+                if activated and self.config.profit_lock_floor_roe > 0:
+                    floor_distance = (
+                        self.config.profit_lock_floor_roe / 100 / self.config.leverage
+                    )
+                    floor_price = self._position.entry_price * (
+                        1 + direction * floor_distance
+                    )
+                    if self._position.side is PositionSide.LONG:
+                        trailing.current_stoploss_price = max(
+                            trailing.current_stoploss_price,
+                            floor_price,
+                        )
+                    else:
+                        trailing.current_stoploss_price = min(
+                            trailing.current_stoploss_price,
+                            floor_price,
+                        )
         else:
             self._trailing.update_stoploss_price("backtest", close_price)
 

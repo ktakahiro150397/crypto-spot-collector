@@ -50,6 +50,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--take-profit-roe", type=float, default=15.0)
     parser.add_argument("--stop-loss-roe", type=float, default=3.0)
     parser.add_argument("--trailing-activation-roe", type=float, default=7.0)
+    parser.add_argument("--profit-lock-floor-roe", type=float, default=0.0)
     parser.add_argument("--trailing-interval-minutes", type=int, default=3)
     parser.add_argument("--sar-consecutive-count", type=int, default=4)
     parser.add_argument("--sar-close-consecutive-count", type=int, default=2)
@@ -94,6 +95,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         take_profit_roe=args.take_profit_roe,
         stop_loss_roe=args.stop_loss_roe,
         trailing_activation_roe=args.trailing_activation_roe,
+        profit_lock_floor_roe=args.profit_lock_floor_roe,
         trailing_interval_minutes=args.trailing_interval_minutes,
         sar_consecutive_count=args.sar_consecutive_count,
         sar_close_consecutive_count=args.sar_close_consecutive_count,
