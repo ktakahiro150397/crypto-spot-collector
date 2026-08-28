@@ -34,6 +34,7 @@ backtest-sweep = "crypto_spot_collector.backtesting.sweep:main"
 backtest-regime-sweep = "crypto_spot_collector.backtesting.regime_sweep:main"
 backtest-strategy-search = "crypto_spot_collector.backtesting.strategy_search:main"
 backtest-entry-candidates = "crypto_spot_collector.scripts.evaluate_entry_candidates:main"
+backtest-portfolio-arsenal = "crypto_spot_collector.scripts.evaluate_portfolio_arsenal:main"
 
 [project.optional-dependencies]
 dev = [
