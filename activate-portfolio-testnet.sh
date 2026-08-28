@@ -18,20 +18,22 @@ if docker compose ps -q app_perp | grep -q .; then
   exit 1
 fi
 
-uv run python -m crypto_spot_collector.scripts.portfolio_testnet_preflight \
-  --settings "$HYPERLIQUID_PERP_SETTINGS_FILE" \
-  --secrets "$HYPERLIQUID_PERP_SECRETS_FILE" \
-  --allow-entries-enabled
 docker compose --profile portfolio-testnet config --quiet
 mkdir -p backups
 
 timestamp="$(date -u +%Y%m%dT%H%M%SZ)"
+docker compose --profile portfolio-testnet build app_portfolio_testnet
+docker compose --profile portfolio-testnet run --rm --no-deps --entrypoint uv \
+  app_portfolio_testnet run python \
+  -m crypto_spot_collector.scripts.portfolio_testnet_preflight \
+  --settings /run/secrets/hyperliquid_settings.json \
+  --secrets /run/secrets/hyperliquid_credentials.json \
+  --allow-entries-enabled
 docker compose --profile portfolio-testnet run --rm --no-deps --entrypoint uv \
   app_portfolio_testnet run python -m crypto_spot_collector.scripts.state_admin \
   backup --state-dir /var/lib/crypto-spot-collector \
   --output "/backups/order_intents-${timestamp}.sqlite"
 
-docker compose --profile portfolio-testnet build app_portfolio_testnet
 docker compose --profile portfolio-testnet up -d --force-recreate --no-deps \
   app_portfolio_testnet
 

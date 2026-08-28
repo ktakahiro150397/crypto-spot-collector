@@ -64,8 +64,9 @@ to proceed while the old service is running.
 ./deploy-portfolio-testnet.sh
 ```
 
-The script runs the offline preflight, validates the Compose graph, builds the image,
-backs up any existing SQLite state even on the first portfolio deployment,
+The script validates the Compose graph, builds the image, runs the offline preflight
+inside that image (the host does not need `uv`), backs up any existing SQLite state
+even on the first portfolio deployment,
 force-recreates the service so secret/config source changes cannot reuse an old
 container, and waits for health. It does not accept an enabled settings file.
 

@@ -107,6 +107,14 @@ def test_deploy_script_requires_disabled_preflight_and_refuses_old_bot() -> None
     assert "state_admin" in script
     assert script.index("build app_portfolio_testnet") < script.index("state_admin")
     assert "if docker compose --profile portfolio-testnet ps -q" not in script
+    assert (
+        "uv run python -m crypto_spot_collector.scripts.portfolio_testnet_preflight"
+        not in script
+    )
+    assert "--settings /run/secrets/hyperliquid_settings.json" in script
+    assert script.index("build app_portfolio_testnet") < script.index(
+        "portfolio_testnet_preflight"
+    )
 
 
 def test_activation_requires_exact_phrase_and_enabled_preflight() -> None:
@@ -116,3 +124,8 @@ def test_activation_requires_exact_phrase_and_enabled_preflight() -> None:
     assert "portfolio_testnet_preflight" in script
     assert "state_admin" in script
     assert "--force-recreate" in script
+    assert (
+        "uv run python -m crypto_spot_collector.scripts.portfolio_testnet_preflight"
+        not in script
+    )
+    assert "--secrets /run/secrets/hyperliquid_credentials.json" in script
