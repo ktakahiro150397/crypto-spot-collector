@@ -33,6 +33,7 @@ download-binance-futures-data = "crypto_spot_collector.backtesting.binance_data:
 backtest-sweep = "crypto_spot_collector.backtesting.sweep:main"
 backtest-regime-sweep = "crypto_spot_collector.backtesting.regime_sweep:main"
 backtest-strategy-search = "crypto_spot_collector.backtesting.strategy_search:main"
+backtest-entry-candidates = "crypto_spot_collector.scripts.evaluate_entry_candidates:main"
 
 [project.optional-dependencies]
 dev = [
